@@ -48,6 +48,25 @@ gulp.task('bundle-aurelia', done => {
   rjs.optimize(config, () => done());
 });
 
+gulp.task('bundle-babel', done => {
+  var config = {
+    name: 'babel-manifest',
+    out: 'bundles/babel.js',
+    rawText: {
+      'babel-manifest': `
+        define([
+          "text",
+          "es6",
+          "babel"
+        ], function() {});`
+    },
+    optimize: 'none'
+  };
+
+  Object.assign(config, configBase);
+  rjs.optimize(config, () => done());
+});
+
 function unbundle(name, done) {
   var config = {
     name: name + '-manifest',
@@ -65,5 +84,9 @@ gulp.task('unbundle-aurelia', done => {
    unbundle('aurelia', done);
 });
 
-gulp.task('bundle', ['bundle-aurelia']);
-gulp.task('unbundle', ['unbundle-aurelia']);
+gulp.task('unbundle-babel', done => {
+   unbundle('babel', done);
+});
+
+gulp.task('bundle', ['bundle-aurelia', 'bundle-babel']);
+gulp.task('unbundle', ['unbundle-aurelia', 'unbundle-babel']);

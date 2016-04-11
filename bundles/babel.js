@@ -1,0 +1,1 @@
+define('babel-manifest',[], function() {});
