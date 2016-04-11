@@ -1,0 +1,1 @@
+define('aurelia-manifest',[], function() {});
