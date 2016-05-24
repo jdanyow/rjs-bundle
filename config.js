@@ -3,8 +3,10 @@ require.config({
   paths: {
     "aurelia-binding": "node_modules/aurelia-binding/dist/amd/aurelia-binding",
     "aurelia-bootstrapper": "node_modules/aurelia-bootstrapper/dist/amd/aurelia-bootstrapper",
+    //"aurelia-breeze": "node_modules/aurelia-breeze/dist/amd/aurelia-breeze",
     "aurelia-dependency-injection": "node_modules/aurelia-dependency-injection/dist/amd/aurelia-dependency-injection",
     "aurelia-event-aggregator": "node_modules/aurelia-event-aggregator/dist/amd/aurelia-event-aggregator",
+    "aurelia-fetch-client": "node_modules/aurelia-fetch-client/dist/amd/aurelia-fetch-client",
     "aurelia-framework": "node_modules/aurelia-framework/dist/amd/aurelia-framework",
     "aurelia-http-client": "node_modules/aurelia-http-client/dist/amd/aurelia-http-client",
     "aurelia-history": "node_modules/aurelia-history/dist/amd/aurelia-history",
@@ -23,9 +25,13 @@ require.config({
     "aurelia-task-queue": "node_modules/aurelia-task-queue/dist/amd/aurelia-task-queue",
     "aurelia-templating": "node_modules/aurelia-templating/dist/amd/aurelia-templating",
     "aurelia-templating-binding": "node_modules/aurelia-templating-binding/dist/amd/aurelia-templating-binding",
+    //"aurelia-ui-virtualization": "node_modules/aurelia-ui-virtualization/dist/amd/aurelia-ui-virtualization",
     "text": "node_modules/text/text",
     "es6": "node_modules/requirejs-babel/es6",
-    "babel": "node_modules/requirejs-babel/babel-5.8.34.min"
+    "babel": "node_modules/requirejs-babel/babel-5.8.34.min",
+    //"i18next": "node_modules/i18next/dist/umd/i18next.min",
+    // "validate.js": "node_modules/validate.js/validate",
+    // "breeze": "node_modules/breeze-client/build/breeze.min"
   },
   packages: [
     {
@@ -38,6 +44,26 @@ require.config({
       location: 'node_modules/aurelia-templating-resources/dist/amd',
       main : 'aurelia-templating-resources'
     },
+    // {
+    //   name: 'aurelia-i18n',
+    //   location: 'node_modules/aurelia-i18n/dist/amd',
+    //   main : 'aurelia-i18n'
+    // },
+    // {
+    //   name: 'aurelia-ui-virtualization',
+    //   location: 'node_modules/aurelia-ui-virtualization/dist/amd',
+    //   main : 'index'
+    // },
+    // {
+    //   name: 'aurelia-validation',
+    //   location: 'node_modules/aurelia-validation/dist/amd',
+    //   main : 'index'
+    // },
+    // {
+    //   name: 'aurelia-validatejs',
+    //   location: 'node_modules/aurelia-validatejs/dist/amd',
+    //   main : 'index'
+    // },
   ],
   config: {
     es6: { stage: 0 }

@@ -19,7 +19,6 @@ gulp.task('bundle-aurelia', done => {
           "aurelia-dependency-injection",
           "aurelia-event-aggregator",
           "aurelia-framework",
-          "aurelia-http-client",
           "aurelia-history",
           "aurelia-history-browser",
           "aurelia-loader",
@@ -38,7 +37,13 @@ gulp.task('bundle-aurelia', done => {
           "aurelia-templating-binding",
 
           "aurelia-templating-router",
-          "aurelia-templating-resources"
+          "aurelia-templating-resources",
+
+          // "aurelia-breeze",
+          // "aurelia-i18n",
+          // "aurelia-validation",
+          // "aurelia-validatejs",
+          // "aurelia-ui-virtualization"
         ], function() {});`
     },
     optimize: 'none'

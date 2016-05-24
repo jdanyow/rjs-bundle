@@ -3,12 +3,24 @@
     "bundles/*",
     "app.html",
     "app.js",
+    "main.js",
     "config.js",
     "favicon.ico",
     "index.html",
     "node_modules/requirejs/require.js",
     "node_modules/text/text.js",
     "node_modules/requirejs-babel/es6.js",
-    "node_modules/requirejs-babel/babel-5.8.34.min.js"
+    "node_modules/requirejs-babel/babel-5.8.34.min.js",
+    
+    "node_modules/i18next/dist/umd/i18next.min.js",
+    "node_modules/validate.js/validate.js",
+
+    "node_modules/aurelia-breeze/dist/amd/*",
+    "node_modules/aurelia-fetch-client/dist/amd/*",
+    "node_modules/aurelia-http-client/dist/amd/*",
+    "node_modules/aurelia-i18n/dist/amd/*",
+    "node_modules/aurelia-validation/dist/amd/*",
+    "node_modules/aurelia-validatejs/dist/amd/*",
+    "node_modules/aurelia-ui-virtualization/dist/amd/*"
   ]
 }
