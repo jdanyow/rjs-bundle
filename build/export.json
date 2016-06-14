@@ -1,6 +1,7 @@
 {
   "list": [
     "bundles/*",
+    "bootstrap-validation/*",
     "app.html",
     "app.js",
     "main.js",
@@ -11,7 +12,7 @@
     "node_modules/text/text.js",
     "node_modules/requirejs-babel/es6.js",
     "node_modules/requirejs-babel/babel-5.8.34.min.js",
-    
+
     "node_modules/i18next/dist/umd/i18next.min.js",
     "node_modules/validate.js/validate.js",
 

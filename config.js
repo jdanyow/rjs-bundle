@@ -1,5 +1,10 @@
 require.config({
   baseUrl: ".",
+  map: {
+    "aurelia-validatejs": {
+      "validate.js": "validatejs"
+    }
+  },
   paths: {
     "aurelia-binding": "node_modules/aurelia-binding/dist/amd/aurelia-binding",
     "aurelia-bootstrapper": "node_modules/aurelia-bootstrapper/dist/amd/aurelia-bootstrapper",
@@ -25,12 +30,13 @@ require.config({
     "aurelia-task-queue": "node_modules/aurelia-task-queue/dist/amd/aurelia-task-queue",
     "aurelia-templating": "node_modules/aurelia-templating/dist/amd/aurelia-templating",
     "aurelia-templating-binding": "node_modules/aurelia-templating-binding/dist/amd/aurelia-templating-binding",
+    "aurelia-validatejs": "node_modules/aurelia-validatejs/dist/amd/aurelia-validatejs",
+    "validatejs": "node_modules/validate.js/validate",
     //"aurelia-ui-virtualization": "node_modules/aurelia-ui-virtualization/dist/amd/aurelia-ui-virtualization",
     "text": "node_modules/text/text",
     "es6": "node_modules/requirejs-babel/es6",
     "babel": "node_modules/requirejs-babel/babel-5.8.34.min",
     //"i18next": "node_modules/i18next/dist/umd/i18next.min",
-    // "validate.js": "node_modules/validate.js/validate",
     // "breeze": "node_modules/breeze-client/build/breeze.min"
   },
   packages: [
@@ -54,15 +60,15 @@ require.config({
     //   location: 'node_modules/aurelia-ui-virtualization/dist/amd',
     //   main : 'index'
     // },
-    // {
-    //   name: 'aurelia-validation',
-    //   location: 'node_modules/aurelia-validation/dist/amd',
-    //   main : 'index'
-    // },
+    {
+      name: 'aurelia-validation',
+      location: 'node_modules/aurelia-validation/dist/amd',
+      main : 'aurelia-validation'
+    },
     // {
     //   name: 'aurelia-validatejs',
     //   location: 'node_modules/aurelia-validatejs/dist/amd',
-    //   main : 'index'
+    //   main : 'aurelia-validatejs'
     // },
   ],
   config: {
