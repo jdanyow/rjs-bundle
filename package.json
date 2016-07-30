@@ -27,7 +27,7 @@
     "yargs": "^2.1.1"
   },
   "dependencies": {
-    "aurelia-binding": "^1.0.0",
+    "aurelia-binding": "^1.0.1",
     "aurelia-bootstrapper": "^1.0.0",
     "aurelia-dependency-injection": "^1.0.0",
     "aurelia-event-aggregator": "^1.0.0",
