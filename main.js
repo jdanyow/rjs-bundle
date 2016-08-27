@@ -9,7 +9,6 @@ export function configure(aurelia) {
     .standardConfiguration()
     .developmentLogging()
     .plugin('aurelia-validation')
-    .plugin('aurelia-validatejs')
     .feature('bootstrap-validation');
     // .plugin('aurelia-ui-virtualization')
     // .plugin('aurelia-i18n')

@@ -1,10 +1,5 @@
 require.config({
   baseUrl: ".",
-  map: {
-    "aurelia-validatejs": {
-      "validate.js": "validatejs"
-    }
-  },
   paths: {
     "aurelia-binding": "node_modules/aurelia-binding/dist/amd/aurelia-binding",
     "aurelia-bootstrapper": "node_modules/aurelia-bootstrapper/dist/amd/aurelia-bootstrapper",
@@ -30,8 +25,6 @@ require.config({
     "aurelia-task-queue": "node_modules/aurelia-task-queue/dist/amd/aurelia-task-queue",
     "aurelia-templating": "node_modules/aurelia-templating/dist/amd/aurelia-templating",
     "aurelia-templating-binding": "node_modules/aurelia-templating-binding/dist/amd/aurelia-templating-binding",
-    "aurelia-validatejs": "node_modules/aurelia-validatejs/dist/amd/aurelia-validatejs",
-    "validatejs": "node_modules/validate.js/validate",
     //"aurelia-ui-virtualization": "node_modules/aurelia-ui-virtualization/dist/amd/aurelia-ui-virtualization",
     "text": "node_modules/text/text",
     "es6": "node_modules/requirejs-babel/es6",
@@ -65,11 +58,6 @@ require.config({
       location: 'node_modules/aurelia-validation/dist/amd',
       main : 'aurelia-validation'
     },
-    // {
-    //   name: 'aurelia-validatejs',
-    //   location: 'node_modules/aurelia-validatejs/dist/amd',
-    //   main : 'aurelia-validatejs'
-    // },
   ],
   config: {
     es6: { stage: 0 }

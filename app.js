@@ -1,17 +1,12 @@
 import {inject, NewInstance} from 'aurelia-dependency-injection';
-import {ValidationController} from 'aurelia-validation';
-import {required, email} from 'aurelia-validatejs';
+import {ValidationController, ValidationRules} from 'aurelia-validation';
 
 @inject(NewInstance.of(ValidationController))
 export class RegistrationForm {
-  @required
   firstName = '';
 
-  @required
   lastName = '';
 
-  @required
-  @email
   email = '';
 
   constructor(validationController) {
@@ -23,3 +18,9 @@ export class RegistrationForm {
     // todo: call server...
   }
 }
+
+ValidationRules
+  .ensure(x => x.firstName).required()
+  .ensure(x => x.lastName).required()
+  .ensure(x => x.email).required().email()
+  .on(RegistrationForm);

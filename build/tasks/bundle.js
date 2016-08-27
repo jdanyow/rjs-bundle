@@ -41,9 +41,7 @@ gulp.task('bundle-aurelia', done => {
 
           // "aurelia-breeze",
           // "aurelia-i18n",
-          "aurelia-validation",
-          "aurelia-validatejs",
-          "validatejs",
+          "aurelia-validation"
           // "aurelia-ui-virtualization"
         ], function() {});`
     },
