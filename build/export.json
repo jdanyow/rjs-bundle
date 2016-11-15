@@ -2,6 +2,7 @@
   "list": [
     "bundles/*",
     "bootstrap-validation/*",
+    ".nojekyll",
     "app.html",
     "app.js",
     "main.js",
