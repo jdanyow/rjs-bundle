@@ -7,6 +7,7 @@ define('aurelia-logging',['exports'], function (exports) {
   exports.getLogger = getLogger;
   exports.addAppender = addAppender;
   exports.setLevel = setLevel;
+  exports.getLevel = getLevel;
 
   
 
@@ -108,6 +109,10 @@ define('aurelia-logging',['exports'], function (exports) {
     }
   }
 
+  function getLevel() {
+    return globalDefaultLevel;
+  }
+
   var Logger = exports.Logger = function () {
     function Logger(id, key) {
       
@@ -144,6 +149,7 @@ define('aurelia-pal',['exports'], function (exports) {
   });
   exports.AggregateError = AggregateError;
   exports.initializePAL = initializePAL;
+  exports.reset = reset;
   function AggregateError(message, innerError, skipIfAlreadyAggregate) {
     if (innerError) {
       if (innerError.innerError && skipIfAlreadyAggregate) {
@@ -200,8 +206,12 @@ define('aurelia-pal',['exports'], function (exports) {
   }();
 
   var DOM = exports.DOM = {};
-
+  var isInitialized = exports.isInitialized = false;
   function initializePAL(callback) {
+    if (isInitialized) {
+      return;
+    }
+    exports.isInitialized = isInitialized = true;
     if (typeof Object.getPropertyDescriptor !== 'function') {
       Object.getPropertyDescriptor = function (subject, name) {
         var pd = Object.getOwnPropertyDescriptor(subject, name);
@@ -215,6 +225,9 @@ define('aurelia-pal',['exports'], function (exports) {
     }
 
     callback(PLATFORM, FEATURE, DOM);
+  }
+  function reset() {
+    exports.isInitialized = isInitialized = false;
   }
 });
 define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aureliaPal) {
@@ -651,7 +664,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.getSetObserver = exports.BindingEngine = exports.NameExpression = exports.Listener = exports.ListenerExpression = exports.BindingBehaviorResource = exports.ValueConverterResource = exports.Call = exports.CallExpression = exports.Binding = exports.BindingExpression = exports.ObjectObservationAdapter = exports.ObserverLocator = exports.SVGAnalyzer = exports.presentationAttributes = exports.presentationElements = exports.elements = exports.ComputedExpression = exports.ClassObserver = exports.SelectValueObserver = exports.CheckedObserver = exports.ValueAttributeObserver = exports.StyleObserver = exports.DataAttributeObserver = exports.dataAttributeAccessor = exports.XLinkAttributeObserver = exports.SetterObserver = exports.PrimitiveObserver = exports.propertyAccessor = exports.DirtyCheckProperty = exports.DirtyChecker = exports.EventManager = exports.getMapObserver = exports.ParserImplementation = exports.Parser = exports.Scanner = exports.Lexer = exports.Token = exports.bindingMode = exports.ExpressionCloner = exports.Unparser = exports.LiteralObject = exports.LiteralArray = exports.LiteralString = exports.LiteralPrimitive = exports.PrefixNot = exports.Binary = exports.CallFunction = exports.CallMember = exports.CallScope = exports.AccessKeyed = exports.AccessMember = exports.AccessScope = exports.AccessThis = exports.Conditional = exports.Assign = exports.ValueConverter = exports.BindingBehavior = exports.Chain = exports.Expression = exports.getArrayObserver = exports.CollectionLengthObserver = exports.ModifyCollectionObserver = exports.ExpressionObserver = exports.sourceContext = undefined;
+  exports.getSetObserver = exports.BindingEngine = exports.NameExpression = exports.Listener = exports.ListenerExpression = exports.BindingBehaviorResource = exports.ValueConverterResource = exports.Call = exports.CallExpression = exports.Binding = exports.BindingExpression = exports.ObjectObservationAdapter = exports.ObserverLocator = exports.SVGAnalyzer = exports.presentationAttributes = exports.presentationElements = exports.elements = exports.ComputedExpression = exports.ClassObserver = exports.SelectValueObserver = exports.CheckedObserver = exports.ValueAttributeObserver = exports.StyleObserver = exports.DataAttributeObserver = exports.dataAttributeAccessor = exports.XLinkAttributeObserver = exports.SetterObserver = exports.PrimitiveObserver = exports.propertyAccessor = exports.DirtyCheckProperty = exports.DirtyChecker = exports.EventManager = exports.delegationStrategy = exports.getMapObserver = exports.ParserImplementation = exports.Parser = exports.Scanner = exports.Lexer = exports.Token = exports.bindingMode = exports.ExpressionCloner = exports.Unparser = exports.LiteralObject = exports.LiteralArray = exports.LiteralString = exports.LiteralPrimitive = exports.PrefixNot = exports.Binary = exports.CallFunction = exports.CallMember = exports.CallScope = exports.AccessKeyed = exports.AccessMember = exports.AccessScope = exports.AccessThis = exports.Conditional = exports.Assign = exports.ValueConverter = exports.BindingBehavior = exports.Chain = exports.Expression = exports.getArrayObserver = exports.CollectionLengthObserver = exports.ModifyCollectionObserver = exports.ExpressionObserver = exports.sourceContext = undefined;
   exports.camelCase = camelCase;
   exports.createOverrideContext = createOverrideContext;
   exports.getContextFor = getContextFor;
@@ -865,7 +878,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
   }
 
-  var bindings = new Map();
+  var queue = [];
+  var queued = {};
+  var nextId = 0;
   var minimumImmediate = 100;
   var frameBudget = 15;
 
@@ -873,17 +888,11 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   var immediate = 0;
 
   function flush(animationFrameStart) {
+    var length = queue.length;
     var i = 0;
-    var keys = bindings.keys();
-    var item = void 0;
-
-    while (item = keys.next()) {
-      if (item.done) {
-        break;
-      }
-
-      var binding = item.value;
-      bindings.delete(binding);
+    while (i < length) {
+      var binding = queue[i];
+      queued[binding.__connectQueueId] = false;
       binding.connect(true);
       i++;
 
@@ -891,8 +900,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         break;
       }
     }
+    queue.splice(0, i);
 
-    if (bindings.size) {
+    if (queue.length) {
       _aureliaPal.PLATFORM.requestAnimationFrame(flush);
     } else {
       isFlushRequested = false;
@@ -905,7 +915,17 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       immediate++;
       binding.connect(false);
     } else {
-      bindings.set(binding);
+      var id = binding.__connectQueueId;
+      if (id === undefined) {
+        id = nextId;
+        nextId++;
+        binding.__connectQueueId = id;
+      }
+
+      if (!queued[id]) {
+        queue.push(binding);
+        queued[id] = true;
+      }
     }
     if (!isFlushRequested) {
       isFlushRequested = true;
@@ -3655,7 +3675,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         if (this.optional('.')) {
           name = this.peek.key;
           this.advance();
-        } else if (this.peek === EOF || this.peek.text === '(' || this.peek.text === '[' || this.peek.text === '}' || this.peek.text === ',') {
+        } else if (this.peek === EOF || this.peek.text === '(' || this.peek.text === ')' || this.peek.text === '[' || this.peek.text === '}' || this.peek.text === ',') {
           return new AccessThis(ancestor);
         } else {
           this.error('Unexpected token ' + this.peek.text);
@@ -3837,13 +3857,71 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     return event.path && event.path[0] || event.deepPath && event.deepPath[0] || event.target;
   }
 
+  function stopPropagation() {
+    this.standardStopPropagation();
+    this.propagationStopped = true;
+  }
+
   function interceptStopPropagation(event) {
     event.standardStopPropagation = event.stopPropagation;
-    event.stopPropagation = function () {
-      this.propagationStopped = true;
-      this.standardStopPropagation();
-    };
+    event.stopPropagation = stopPropagation;
   }
+
+  function handleCapturedEvent(event) {
+    var interceptInstalled = false;
+    event.propagationStopped = false;
+    var target = findOriginalEventTarget(event);
+
+    var orderedCallbacks = [];
+
+    while (target) {
+      if (target.capturedCallbacks) {
+        var callback = target.capturedCallbacks[event.type];
+        if (callback) {
+          if (!interceptInstalled) {
+            interceptStopPropagation(event);
+            interceptInstalled = true;
+          }
+          orderedCallbacks.push(callback);
+        }
+      }
+      target = target.parentNode;
+    }
+    for (var _i22 = orderedCallbacks.length - 1; _i22 >= 0; _i22--) {
+      var orderedCallback = orderedCallbacks[_i22];
+      orderedCallback(event);
+      if (event.propagationStopped) {
+        break;
+      }
+    }
+  }
+
+  var CapturedHandlerEntry = function () {
+    function CapturedHandlerEntry(eventName) {
+      
+
+      this.eventName = eventName;
+      this.count = 0;
+    }
+
+    CapturedHandlerEntry.prototype.increment = function increment() {
+      this.count++;
+
+      if (this.count === 1) {
+        _aureliaPal.DOM.addEventListener(this.eventName, handleCapturedEvent, true);
+      }
+    };
+
+    CapturedHandlerEntry.prototype.decrement = function decrement() {
+      this.count--;
+
+      if (this.count === 0) {
+        _aureliaPal.DOM.removeEventListener(this.eventName, handleCapturedEvent, true);
+      }
+    };
+
+    return CapturedHandlerEntry;
+  }();
 
   function handleDelegatedEvent(event) {
     var interceptInstalled = false;
@@ -3898,15 +3976,20 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       
 
       this.delegatedHandlers = {};
+      this.capturedHandlers = {};
     }
 
-    DefaultEventStrategy.prototype.subscribe = function subscribe(target, targetEvent, callback, delegate) {
+    DefaultEventStrategy.prototype.subscribe = function subscribe(target, targetEvent, callback, strategy) {
       var _this22 = this;
 
-      if (delegate) {
+      var delegatedHandlers = void 0;
+      var capturedHandlers = void 0;
+      var handlerEntry = void 0;
+
+      if (strategy === delegationStrategy.bubbling) {
         var _ret = function () {
-          var delegatedHandlers = _this22.delegatedHandlers;
-          var handlerEntry = delegatedHandlers[targetEvent] || (delegatedHandlers[targetEvent] = new DelegateHandlerEntry(targetEvent));
+          delegatedHandlers = _this22.delegatedHandlers;
+          handlerEntry = delegatedHandlers[targetEvent] || (delegatedHandlers[targetEvent] = new DelegateHandlerEntry(targetEvent));
           var delegatedCallbacks = target.delegatedCallbacks || (target.delegatedCallbacks = {});
 
           handlerEntry.increment();
@@ -3922,6 +4005,25 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
         if ((typeof _ret === 'undefined' ? 'undefined' : _typeof(_ret)) === "object") return _ret.v;
       }
+      if (strategy === delegationStrategy.capturing) {
+        var _ret2 = function () {
+          capturedHandlers = _this22.capturedHandlers;
+          handlerEntry = capturedHandlers[targetEvent] || (capturedHandlers[targetEvent] = new CapturedHandlerEntry(targetEvent));
+          var capturedCallbacks = target.capturedCallbacks || (target.capturedCallbacks = {});
+
+          handlerEntry.increment();
+          capturedCallbacks[targetEvent] = callback;
+
+          return {
+            v: function v() {
+              handlerEntry.decrement();
+              capturedCallbacks[targetEvent] = null;
+            }
+          };
+        }();
+
+        if ((typeof _ret2 === 'undefined' ? 'undefined' : _typeof(_ret2)) === "object") return _ret2.v;
+      }
 
       target.addEventListener(targetEvent, callback, false);
 
@@ -3932,6 +4034,12 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
     return DefaultEventStrategy;
   }();
+
+  var delegationStrategy = exports.delegationStrategy = {
+    none: 0,
+    capturing: 1,
+    bubbling: 2
+  };
 
   var EventManager = exports.EventManager = function () {
     function EventManager() {
@@ -4353,10 +4461,15 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       if (newValue !== null && newValue !== undefined) {
         if (newValue instanceof Object) {
+          var value = void 0;
           for (style in newValue) {
             if (newValue.hasOwnProperty(style)) {
+              value = newValue[style];
+              style = style.replace(/([A-Z])/g, function (m) {
+                return '-' + m.toLowerCase();
+              });
               styles[style] = version;
-              this._setProperty(style, newValue[style]);
+              this._setProperty(style, value);
             }
           }
         } else if (newValue.length) {
@@ -4670,9 +4783,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       };
 
       while (i--) {
-        var _ret2 = _loop();
+        var _ret3 = _loop();
 
-        if (_ret2 === 'continue') continue;
+        if (_ret3 === 'continue') continue;
       }
     };
 
@@ -4683,8 +4796,8 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       var count = 0;
       var value = [];
 
-      for (var _i22 = 0, ii = options.length; _i22 < ii; _i22++) {
-        var _option = options.item(_i22);
+      for (var _i23 = 0, ii = options.length; _i23 < ii; _i23++) {
+        var _option = options.item(_i23);
         if (!_option.selected) {
           continue;
         }
@@ -4694,7 +4807,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       if (this.element.multiple) {
         if (Array.isArray(this.value)) {
-          var _ret3 = function () {
+          var _ret4 = function () {
             var matcher = _this24.element.matcher || function (a, b) {
               return a === b;
             };
@@ -4736,7 +4849,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
             };
           }();
 
-          if ((typeof _ret3 === 'undefined' ? 'undefined' : _typeof(_ret3)) === "object") return _ret3.v;
+          if ((typeof _ret4 === 'undefined' ? 'undefined' : _typeof(_ret4)) === "object") return _ret4.v;
         }
       } else {
         if (count === 0) {
@@ -4819,8 +4932,8 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       if (newValue !== null && newValue !== undefined && newValue.length) {
         names = newValue.split(/\s+/);
-        for (var _i23 = 0, length = names.length; _i23 < length; _i23++) {
-          name = names[_i23];
+        for (var _i24 = 0, length = names.length; _i24 < length; _i24++) {
+          name = names[_i24];
           if (name === '') {
             continue;
           }
@@ -4913,9 +5026,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   function createComputedObserver(obj, propertyName, descriptor, observerLocator) {
     var dependencies = descriptor.get.dependencies;
     if (!(dependencies instanceof ComputedExpression)) {
-      var _i24 = dependencies.length;
-      while (_i24--) {
-        dependencies[_i24] = observerLocator.parser.parse(dependencies[_i24]);
+      var _i25 = dependencies.length;
+      while (_i25--) {
+        dependencies[_i25] = observerLocator.parser.parse(dependencies[_i25]);
       }
       dependencies = descriptor.get.dependencies = new ComputedExpression(propertyName, dependencies);
     }
@@ -5209,8 +5322,8 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     ObserverLocator.prototype.getAdapterObserver = function getAdapterObserver(obj, propertyName, descriptor) {
-      for (var _i25 = 0, ii = this.adapters.length; _i25 < ii; _i25++) {
-        var adapter = this.adapters[_i25];
+      for (var _i26 = 0, ii = this.adapters.length; _i26 < ii; _i26++) {
+        var adapter = this.adapters[_i26];
         var observer = adapter.getObserver(obj, propertyName, descriptor);
         if (observer) {
           return observer;
@@ -5619,32 +5732,32 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   }
 
   var ListenerExpression = exports.ListenerExpression = function () {
-    function ListenerExpression(eventManager, targetEvent, sourceExpression, delegate, preventDefault, lookupFunctions) {
+    function ListenerExpression(eventManager, targetEvent, sourceExpression, delegationStrategy, preventDefault, lookupFunctions) {
       
 
       this.eventManager = eventManager;
       this.targetEvent = targetEvent;
       this.sourceExpression = sourceExpression;
-      this.delegate = delegate;
+      this.delegationStrategy = delegationStrategy;
       this.discrete = true;
       this.preventDefault = preventDefault;
       this.lookupFunctions = lookupFunctions;
     }
 
     ListenerExpression.prototype.createBinding = function createBinding(target) {
-      return new Listener(this.eventManager, this.targetEvent, this.delegate, this.sourceExpression, target, this.preventDefault, this.lookupFunctions);
+      return new Listener(this.eventManager, this.targetEvent, this.delegationStrategy, this.sourceExpression, target, this.preventDefault, this.lookupFunctions);
     };
 
     return ListenerExpression;
   }();
 
   var Listener = exports.Listener = function () {
-    function Listener(eventManager, targetEvent, delegate, sourceExpression, target, preventDefault, lookupFunctions) {
+    function Listener(eventManager, targetEvent, delegationStrategy, sourceExpression, target, preventDefault, lookupFunctions) {
       
 
       this.eventManager = eventManager;
       this.targetEvent = targetEvent;
-      this.delegate = delegate;
+      this.delegationStrategy = delegationStrategy;
       this.sourceExpression = sourceExpression;
       this.target = target;
       this.preventDefault = preventDefault;
@@ -5680,7 +5793,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       }
       this._disposeListener = this.eventManager.addEventListener(this.target, this.targetEvent, function (event) {
         return _this28.callSource(event);
-      }, this.delegate);
+      }, this.delegationStrategy);
     };
 
     Listener.prototype.unbind = function unbind() {
@@ -5992,6 +6105,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       };
       descriptor.set = function (newValue) {
         var oldValue = this[innerPropertyName];
+        if (newValue === oldValue) {
+          return;
+        }
 
         this[innerPropertyName] = newValue;
         Reflect.defineProperty(this, innerPropertyName, { enumerable: false });
@@ -6016,523 +6132,6 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       };
     }
     return deco(targetOrConfig, key, descriptor);
-  }
-});
-define('aurelia-pal-browser',['exports', 'aurelia-pal'], function (exports, _aureliaPal) {
-  'use strict';
-
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports._DOM = exports._FEATURE = exports._PLATFORM = undefined;
-  exports._ensureFunctionName = _ensureFunctionName;
-  exports._ensureClassList = _ensureClassList;
-  exports._ensurePerformance = _ensurePerformance;
-  exports._ensureCustomEvent = _ensureCustomEvent;
-  exports._ensureElementMatches = _ensureElementMatches;
-  exports._ensureHTMLTemplateElement = _ensureHTMLTemplateElement;
-  exports.initialize = initialize;
-
-  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
-    return typeof obj;
-  } : function (obj) {
-    return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj;
-  };
-
-  var _PLATFORM = exports._PLATFORM = {
-    location: window.location,
-    history: window.history,
-    addEventListener: function addEventListener(eventName, callback, capture) {
-      this.global.addEventListener(eventName, callback, capture);
-    },
-    removeEventListener: function removeEventListener(eventName, callback, capture) {
-      this.global.removeEventListener(eventName, callback, capture);
-    },
-
-    performance: window.performance,
-    requestAnimationFrame: function requestAnimationFrame(callback) {
-      return this.global.requestAnimationFrame(callback);
-    }
-  };
-
-  function _ensureFunctionName() {
-    function test() {}
-
-    if (!test.name) {
-      Object.defineProperty(Function.prototype, 'name', {
-        get: function get() {
-          var name = this.toString().match(/^\s*function\s*(\S*)\s*\(/)[1];
-
-          Object.defineProperty(this, 'name', { value: name });
-          return name;
-        }
-      });
-    }
-  }
-
-  function _ensureClassList() {
-    if (!('classList' in document.createElement('_')) || document.createElementNS && !('classList' in document.createElementNS('http://www.w3.org/2000/svg', 'g'))) {
-      (function () {
-        var protoProp = 'prototype';
-        var strTrim = String.prototype.trim;
-        var arrIndexOf = Array.prototype.indexOf;
-        var emptyArray = [];
-
-        var DOMEx = function DOMEx(type, message) {
-          this.name = type;
-          this.code = DOMException[type];
-          this.message = message;
-        };
-
-        var checkTokenAndGetIndex = function checkTokenAndGetIndex(classList, token) {
-          if (token === '') {
-            throw new DOMEx('SYNTAX_ERR', 'An invalid or illegal string was specified');
-          }
-
-          if (/\s/.test(token)) {
-            throw new DOMEx('INVALID_CHARACTER_ERR', 'String contains an invalid character');
-          }
-
-          return arrIndexOf.call(classList, token);
-        };
-
-        var ClassList = function ClassList(elem) {
-          var trimmedClasses = strTrim.call(elem.getAttribute('class') || '');
-          var classes = trimmedClasses ? trimmedClasses.split(/\s+/) : emptyArray;
-
-          for (var i = 0, ii = classes.length; i < ii; ++i) {
-            this.push(classes[i]);
-          }
-
-          this._updateClassName = function () {
-            elem.setAttribute('class', this.toString());
-          };
-        };
-
-        var classListProto = ClassList[protoProp] = [];
-
-        DOMEx[protoProp] = Error[protoProp];
-
-        classListProto.item = function (i) {
-          return this[i] || null;
-        };
-
-        classListProto.contains = function (token) {
-          token += '';
-          return checkTokenAndGetIndex(this, token) !== -1;
-        };
-
-        classListProto.add = function () {
-          var tokens = arguments;
-          var i = 0;
-          var ii = tokens.length;
-          var token = void 0;
-          var updated = false;
-
-          do {
-            token = tokens[i] + '';
-            if (checkTokenAndGetIndex(this, token) === -1) {
-              this.push(token);
-              updated = true;
-            }
-          } while (++i < ii);
-
-          if (updated) {
-            this._updateClassName();
-          }
-        };
-
-        classListProto.remove = function () {
-          var tokens = arguments;
-          var i = 0;
-          var ii = tokens.length;
-          var token = void 0;
-          var updated = false;
-          var index = void 0;
-
-          do {
-            token = tokens[i] + '';
-            index = checkTokenAndGetIndex(this, token);
-            while (index !== -1) {
-              this.splice(index, 1);
-              updated = true;
-              index = checkTokenAndGetIndex(this, token);
-            }
-          } while (++i < ii);
-
-          if (updated) {
-            this._updateClassName();
-          }
-        };
-
-        classListProto.toggle = function (token, force) {
-          token += '';
-
-          var result = this.contains(token);
-          var method = result ? force !== true && 'remove' : force !== false && 'add';
-
-          if (method) {
-            this[method](token);
-          }
-
-          if (force === true || force === false) {
-            return force;
-          }
-
-          return !result;
-        };
-
-        classListProto.toString = function () {
-          return this.join(' ');
-        };
-
-        Object.defineProperty(Element.prototype, 'classList', {
-          get: function get() {
-            return new ClassList(this);
-          },
-          enumerable: true,
-          configurable: true
-        });
-      })();
-    } else {
-      var testElement = document.createElement('_');
-      testElement.classList.add('c1', 'c2');
-
-      if (!testElement.classList.contains('c2')) {
-        var createMethod = function createMethod(method) {
-          var original = DOMTokenList.prototype[method];
-
-          DOMTokenList.prototype[method] = function (token) {
-            for (var i = 0, ii = arguments.length; i < ii; ++i) {
-              token = arguments[i];
-              original.call(this, token);
-            }
-          };
-        };
-
-        createMethod('add');
-        createMethod('remove');
-      }
-
-      testElement.classList.toggle('c3', false);
-
-      if (testElement.classList.contains('c3')) {
-        (function () {
-          var _toggle = DOMTokenList.prototype.toggle;
-
-          DOMTokenList.prototype.toggle = function (token, force) {
-            if (1 in arguments && !this.contains(token) === !force) {
-              return force;
-            }
-
-            return _toggle.call(this, token);
-          };
-        })();
-      }
-
-      testElement = null;
-    }
-  }
-
-  function _ensurePerformance() {
-    // @license http://opensource.org/licenses/MIT
-
-
-    if ('performance' in window === false) {
-      window.performance = {};
-    }
-
-    if ('now' in window.performance === false) {
-      (function () {
-        var nowOffset = Date.now();
-
-        if (performance.timing && performance.timing.navigationStart) {
-          nowOffset = performance.timing.navigationStart;
-        }
-
-        window.performance.now = function now() {
-          return Date.now() - nowOffset;
-        };
-      })();
-    }
-
-    _PLATFORM.performance = window.performance;
-  }
-
-  function _ensureCustomEvent() {
-    if (!window.CustomEvent || typeof window.CustomEvent !== 'function') {
-      var _CustomEvent = function _CustomEvent(event, params) {
-        params = params || {
-          bubbles: false,
-          cancelable: false,
-          detail: undefined
-        };
-
-        var evt = document.createEvent('CustomEvent');
-        evt.initCustomEvent(event, params.bubbles, params.cancelable, params.detail);
-        return evt;
-      };
-
-      _CustomEvent.prototype = window.Event.prototype;
-      window.CustomEvent = _CustomEvent;
-    }
-  }
-
-  function _ensureElementMatches() {
-    if (Element && !Element.prototype.matches) {
-      var proto = Element.prototype;
-      proto.matches = proto.matchesSelector || proto.mozMatchesSelector || proto.msMatchesSelector || proto.oMatchesSelector || proto.webkitMatchesSelector;
-    }
-  }
-
-  var _FEATURE = exports._FEATURE = {};
-
-  _FEATURE.shadowDOM = function () {
-    return !!HTMLElement.prototype.attachShadow;
-  }();
-
-  _FEATURE.scopedCSS = function () {
-    return 'scoped' in document.createElement('style');
-  }();
-
-  _FEATURE.htmlTemplateElement = function () {
-    return 'content' in document.createElement('template');
-  }();
-
-  _FEATURE.mutationObserver = function () {
-    return !!(window.MutationObserver || window.WebKitMutationObserver);
-  }();
-
-  function _ensureHTMLTemplateElement() {
-    function isSVGTemplate(el) {
-      return el.tagName === 'template' && el.namespaceURI === 'http://www.w3.org/2000/svg';
-    }
-
-    function fixSVGTemplateElement(el) {
-      var template = el.ownerDocument.createElement('template');
-      var attrs = el.attributes;
-      var length = attrs.length;
-      var attr = void 0;
-
-      el.parentNode.insertBefore(template, el);
-
-      while (length-- > 0) {
-        attr = attrs[length];
-        template.setAttribute(attr.name, attr.value);
-        el.removeAttribute(attr.name);
-      }
-
-      el.parentNode.removeChild(el);
-
-      return fixHTMLTemplateElement(template);
-    }
-
-    function fixHTMLTemplateElement(template) {
-      var content = template.content = document.createDocumentFragment();
-      var child = void 0;
-
-      while (child = template.firstChild) {
-        content.appendChild(child);
-      }
-
-      return template;
-    }
-
-    function fixHTMLTemplateElementRoot(template) {
-      var content = fixHTMLTemplateElement(template).content;
-      var childTemplates = content.querySelectorAll('template');
-
-      for (var i = 0, ii = childTemplates.length; i < ii; ++i) {
-        var child = childTemplates[i];
-
-        if (isSVGTemplate(child)) {
-          fixSVGTemplateElement(child);
-        } else {
-          fixHTMLTemplateElement(child);
-        }
-      }
-
-      return template;
-    }
-
-    if (_FEATURE.htmlTemplateElement) {
-      _FEATURE.ensureHTMLTemplateElement = function (template) {
-        return template;
-      };
-    } else {
-      _FEATURE.ensureHTMLTemplateElement = fixHTMLTemplateElementRoot;
-    }
-  }
-
-  var shadowPoly = window.ShadowDOMPolyfill || null;
-
-  var _DOM = exports._DOM = {
-    Element: Element,
-    SVGElement: SVGElement,
-    boundary: 'aurelia-dom-boundary',
-    addEventListener: function addEventListener(eventName, callback, capture) {
-      document.addEventListener(eventName, callback, capture);
-    },
-    removeEventListener: function removeEventListener(eventName, callback, capture) {
-      document.removeEventListener(eventName, callback, capture);
-    },
-    adoptNode: function adoptNode(node) {
-      return document.adoptNode(node, true);
-    },
-    createElement: function createElement(tagName) {
-      return document.createElement(tagName);
-    },
-    createTextNode: function createTextNode(text) {
-      return document.createTextNode(text);
-    },
-    createComment: function createComment(text) {
-      return document.createComment(text);
-    },
-    createDocumentFragment: function createDocumentFragment() {
-      return document.createDocumentFragment();
-    },
-    createMutationObserver: function createMutationObserver(callback) {
-      return new (window.MutationObserver || window.WebKitMutationObserver)(callback);
-    },
-    createCustomEvent: function createCustomEvent(eventType, options) {
-      return new window.CustomEvent(eventType, options);
-    },
-    dispatchEvent: function dispatchEvent(evt) {
-      document.dispatchEvent(evt);
-    },
-    getComputedStyle: function getComputedStyle(element) {
-      return window.getComputedStyle(element);
-    },
-    getElementById: function getElementById(id) {
-      return document.getElementById(id);
-    },
-    querySelectorAll: function querySelectorAll(query) {
-      return document.querySelectorAll(query);
-    },
-    nextElementSibling: function nextElementSibling(element) {
-      if (element.nextElementSibling) {
-        return element.nextElementSibling;
-      }
-      do {
-        element = element.nextSibling;
-      } while (element && element.nodeType !== 1);
-      return element;
-    },
-    createTemplateFromMarkup: function createTemplateFromMarkup(markup) {
-      var parser = document.createElement('div');
-      parser.innerHTML = markup;
-
-      var temp = parser.firstElementChild;
-      if (!temp || temp.nodeName !== 'TEMPLATE') {
-        throw new Error('Template markup must be wrapped in a <template> element e.g. <template> <!-- markup here --> </template>');
-      }
-
-      return _FEATURE.ensureHTMLTemplateElement(temp);
-    },
-    appendNode: function appendNode(newNode, parentNode) {
-      (parentNode || document.body).appendChild(newNode);
-    },
-    replaceNode: function replaceNode(newNode, node, parentNode) {
-      if (node.parentNode) {
-        node.parentNode.replaceChild(newNode, node);
-      } else if (shadowPoly !== null) {
-        shadowPoly.unwrap(parentNode).replaceChild(shadowPoly.unwrap(newNode), shadowPoly.unwrap(node));
-      } else {
-        parentNode.replaceChild(newNode, node);
-      }
-    },
-    removeNode: function removeNode(node, parentNode) {
-      if (node.parentNode) {
-        node.parentNode.removeChild(node);
-      } else if (parentNode) {
-        if (shadowPoly !== null) {
-          shadowPoly.unwrap(parentNode).removeChild(shadowPoly.unwrap(node));
-        } else {
-          parentNode.removeChild(node);
-        }
-      }
-    },
-    injectStyles: function injectStyles(styles, destination, prepend) {
-      var node = document.createElement('style');
-      node.innerHTML = styles;
-      node.type = 'text/css';
-
-      destination = destination || document.head;
-
-      if (prepend && destination.childNodes.length > 0) {
-        destination.insertBefore(node, destination.childNodes[0]);
-      } else {
-        destination.appendChild(node);
-      }
-
-      return node;
-    }
-  };
-
-  var isInitialized = false;
-
-  function initialize() {
-    if (isInitialized) {
-      return;
-    }
-
-    isInitialized = true;
-
-    _ensureCustomEvent();
-    _ensureFunctionName();
-    _ensureHTMLTemplateElement();
-    _ensureElementMatches();
-    _ensureClassList();
-    _ensurePerformance();
-
-    (0, _aureliaPal.initializePAL)(function (platform, feature, dom) {
-      Object.assign(platform, _PLATFORM);
-      Object.assign(feature, _FEATURE);
-      Object.assign(dom, _DOM);
-
-      (function (global) {
-        global.console = global.console || {};
-        var con = global.console;
-        var prop = void 0;
-        var method = void 0;
-        var empty = {};
-        var dummy = function dummy() {};
-        var properties = 'memory'.split(',');
-        var methods = ('assert,clear,count,debug,dir,dirxml,error,exception,group,' + 'groupCollapsed,groupEnd,info,log,markTimeline,profile,profiles,profileEnd,' + 'show,table,time,timeEnd,timeline,timelineEnd,timeStamp,trace,warn').split(',');
-        while (prop = properties.pop()) {
-          if (!con[prop]) con[prop] = empty;
-        }while (method = methods.pop()) {
-          if (!con[method]) con[method] = dummy;
-        }
-      })(platform.global);
-
-      if (platform.global.console && _typeof(console.log) === 'object') {
-        ['log', 'info', 'warn', 'error', 'assert', 'dir', 'clear', 'profile', 'profileEnd'].forEach(function (method) {
-          console[method] = this.bind(console[method], console);
-        }, Function.prototype.call);
-      }
-
-      Object.defineProperty(dom, 'title', {
-        get: function get() {
-          return document.title;
-        },
-        set: function set(value) {
-          document.title = value;
-        }
-      });
-
-      Object.defineProperty(dom, 'activeElement', {
-        get: function get() {
-          return document.activeElement;
-        }
-      });
-
-      Object.defineProperty(platform, 'XMLHttpRequest', {
-        get: function get() {
-          return platform.global.XMLHttpRequest;
-        }
-      });
-    });
   }
 });
 define('aurelia-polyfills',['aurelia-pal'], function (_aureliaPal) {
@@ -7344,18 +6943,21 @@ define('aurelia-polyfills',['aurelia-pal'], function (_aureliaPal) {
     };
   }
 });
-define('aurelia-bootstrapper',['exports', 'aurelia-pal', 'aurelia-pal-browser', 'aurelia-polyfills'], function (exports, _aureliaPal, _aureliaPalBrowser) {
+define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-polyfills'], function (module, exports, _aureliaPal) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
+  exports.starting = undefined;
   exports.bootstrap = bootstrap;
 
 
   var bootstrapQueue = [];
   var sharedLoader = null;
   var Aurelia = null;
+  var host = _aureliaPal.PLATFORM.global;
+  var isNodeLike = typeof process !== 'undefined' && !process.browser;
 
   function onBootstrap(callback) {
     return new Promise(function (resolve, reject) {
@@ -7373,19 +6975,19 @@ define('aurelia-bootstrapper',['exports', 'aurelia-pal', 'aurelia-pal-browser', 
     });
   }
 
-  function ready(global) {
+  function ready() {
     return new Promise(function (resolve, reject) {
-      if (global.document.readyState === 'complete') {
-        resolve(global.document);
+      if (!host.document || host.document.readyState === 'complete') {
+        resolve();
       } else {
-        global.document.addEventListener('DOMContentLoaded', completed);
-        global.addEventListener('load', completed);
+        host.document.addEventListener('DOMContentLoaded', completed);
+        host.addEventListener('load', completed);
       }
 
       function completed() {
-        global.document.removeEventListener('DOMContentLoaded', completed);
-        global.removeEventListener('load', completed);
-        resolve(global.document);
+        host.document.removeEventListener('DOMContentLoaded', completed);
+        host.removeEventListener('load', completed);
+        resolve();
       }
     });
   }
@@ -7395,29 +6997,61 @@ define('aurelia-bootstrapper',['exports', 'aurelia-pal', 'aurelia-pal-browser', 
       return Promise.resolve(new _aureliaPal.PLATFORM.Loader());
     }
 
-    if (window.System && typeof window.System.import === 'function') {
-      return System.normalize('aurelia-bootstrapper').then(function (bootstrapperName) {
-        return System.normalize('aurelia-loader-default', bootstrapperName);
+    if (typeof __webpack_require__ !== 'undefined') {
+      var m = __webpack_require__(require.resolve('aurelia-loader-webpack'));
+      return Promise.resolve(new m.WebpackLoader());
+    }
+
+    if (host.System && typeof host.System.config === 'function') {
+      return host.System.normalize('aurelia-bootstrapper').then(function (bsn) {
+        return host.System.normalize('aurelia-loader-default', bsn);
       }).then(function (loaderName) {
-        return System.import(loaderName).then(function (m) {
+        return host.System.import(loaderName).then(function (m) {
           return new m.DefaultLoader();
         });
       });
     }
 
-    if (typeof window.require === 'function') {
+    if (typeof host.require === 'function' && typeof host.require.version === 'string') {
       return new Promise(function (resolve, reject) {
-        return require(['aurelia-loader-default'], function (m) {
+        return host.require(['aurelia-loader-default'], function (m) {
           return resolve(new m.DefaultLoader());
         }, reject);
       });
     }
 
+    if (isNodeLike && typeof module !== 'undefined' && typeof module.require !== 'undefined') {
+      var _m = module.require('aurelia-loader-nodejs');
+      return Promise.resolve(new _m.NodeJsLoader());
+    }
+
     return Promise.reject('No PLATFORM.Loader is defined and there is neither a System API (ES6) or a Require API (AMD) globally available to load your app.');
   }
 
+  function initializePal(loader) {
+    var type = void 0;
+
+    var isElectronRenderer = isNodeLike && process.type === 'renderer';
+
+    if (isNodeLike && !isElectronRenderer) {
+      type = 'nodejs';
+    } else if (typeof window !== 'undefined') {
+      type = 'browser';
+    } else if (typeof self !== 'undefined') {
+      type = 'worker';
+    } else {
+      throw new Error('Could not determine platform implementation to load.');
+    }
+
+    return loader.loadModule('aurelia-pal-' + type).then(function (palModule) {
+      return type === 'nodejs' && !_aureliaPal.isInitialized && palModule.globalize() || palModule.initialize();
+    });
+  }
+
   function preparePlatform(loader) {
-    return loader.normalize('aurelia-bootstrapper').then(function (bootstrapperName) {
+    return initializePal(loader).then(function () {
+      return loader.normalize('aurelia-bootstrapper');
+    }).then(function (bootstrapperName) {
       return loader.normalize('aurelia-framework', bootstrapperName).then(function (frameworkName) {
         loader.map('aurelia-framework', frameworkName);
 
@@ -7464,22 +7098,22 @@ define('aurelia-bootstrapper',['exports', 'aurelia-pal', 'aurelia-pal-browser', 
   }
 
   function run() {
-    return ready(window).then(function (doc) {
-      (0, _aureliaPalBrowser.initialize)();
+    return ready().then(function () {
+      return createLoader();
+    }).then(function (loader) {
+      return preparePlatform(loader).then(function () {
+        var appHost = host.document.querySelectorAll('[aurelia-app],[data-aurelia-app]');
+        var toConsole = console.error.bind(console);
 
-      var appHost = doc.querySelectorAll('[aurelia-app],[data-aurelia-app]');
-      return createLoader().then(function (loader) {
-        return preparePlatform(loader).then(function () {
-          for (var i = 0, ii = appHost.length; i < ii; ++i) {
-            handleApp(loader, appHost[i]).catch(console.error.bind(console));
-          }
+        for (var i = 0, ii = appHost.length; i < ii; ++i) {
+          handleApp(loader, appHost[i]).catch(toConsole);
+        }
 
-          sharedLoader = loader;
-          for (var _i = 0, _ii = bootstrapQueue.length; _i < _ii; ++_i) {
-            bootstrapQueue[_i]();
-          }
-          bootstrapQueue = null;
-        });
+        sharedLoader = loader;
+        for (var _i = 0, _ii = bootstrapQueue.length; _i < _ii; ++_i) {
+          bootstrapQueue[_i]();
+        }
+        bootstrapQueue = null;
       });
     });
   }
@@ -7491,7 +7125,7 @@ define('aurelia-bootstrapper',['exports', 'aurelia-pal', 'aurelia-pal-browser', 
     });
   }
 
-  run();
+  var starting = exports.starting = run();
 });
 define('aurelia-dependency-injection',['exports', 'aurelia-metadata', 'aurelia-pal'], function (exports, _aureliaMetadata, _aureliaPal) {
   'use strict';
@@ -8288,6 +7922,22 @@ define('aurelia-event-aggregator',['exports', 'aurelia-logging'], function (expo
     return Handler;
   }();
 
+  function invokeCallback(callback, data, event) {
+    try {
+      callback(data, event);
+    } catch (e) {
+      logger.error(e);
+    }
+  }
+
+  function invokeHandler(handler, data) {
+    try {
+      handler.handle(data);
+    } catch (e) {
+      logger.error(e);
+    }
+  }
+
   var EventAggregator = exports.EventAggregator = function () {
     function EventAggregator() {
       
@@ -8310,24 +7960,16 @@ define('aurelia-event-aggregator',['exports', 'aurelia-logging'], function (expo
           subscribers = subscribers.slice();
           i = subscribers.length;
 
-          try {
-            while (i--) {
-              subscribers[i](data, event);
-            }
-          } catch (e) {
-            logger.error(e);
+          while (i--) {
+            invokeCallback(subscribers[i], data, event);
           }
         }
       } else {
         subscribers = this.messageHandlers.slice();
         i = subscribers.length;
 
-        try {
-          while (i--) {
-            subscribers[i].handle(event);
-          }
-        } catch (e) {
-          logger.error(e);
+        while (i--) {
+          invokeHandler(subscribers[i], event);
         }
       }
     };
@@ -11233,7 +10875,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     var value = element.getAttribute('class');
     var auTargetID = getNextAUTargetID();
 
-    element.setAttribute('class', value ? value += ' au-target' : 'au-target');
+    element.setAttribute('class', value ? value + ' au-target' : 'au-target');
     element.setAttribute('au-target-id', auTargetID);
 
     return auTargetID;
@@ -11302,7 +10944,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
         if (targetId) {
           var ins = instructions[targetId];
 
-          if (ins.shadowSlot || ins.lifting) {
+          if (ins.shadowSlot || ins.lifting || ins.elementInstruction && !ins.elementInstruction.anchorIsContainer) {
             content.insertBefore(_aureliaPal.DOM.createComment('view'), firstChild);
           }
         }
@@ -14796,6 +14438,517 @@ define('aurelia-logging-console',['exports', 'aurelia-logging'], function (expor
     return ConsoleAppender;
   }();
 });
+define('aurelia-pal-browser',['exports', 'aurelia-pal'], function (exports, _aureliaPal) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports._DOM = exports._FEATURE = exports._PLATFORM = undefined;
+  exports._ensureFunctionName = _ensureFunctionName;
+  exports._ensureClassList = _ensureClassList;
+  exports._ensurePerformance = _ensurePerformance;
+  exports._ensureCustomEvent = _ensureCustomEvent;
+  exports._ensureElementMatches = _ensureElementMatches;
+  exports._ensureHTMLTemplateElement = _ensureHTMLTemplateElement;
+  exports.initialize = initialize;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  var _PLATFORM = exports._PLATFORM = {
+    location: window.location,
+    history: window.history,
+    addEventListener: function addEventListener(eventName, callback, capture) {
+      this.global.addEventListener(eventName, callback, capture);
+    },
+    removeEventListener: function removeEventListener(eventName, callback, capture) {
+      this.global.removeEventListener(eventName, callback, capture);
+    },
+
+    performance: window.performance,
+    requestAnimationFrame: function requestAnimationFrame(callback) {
+      return this.global.requestAnimationFrame(callback);
+    }
+  };
+
+  function _ensureFunctionName() {
+    function test() {}
+
+    if (!test.name) {
+      Object.defineProperty(Function.prototype, 'name', {
+        get: function get() {
+          var name = this.toString().match(/^\s*function\s*(\S*)\s*\(/)[1];
+
+          Object.defineProperty(this, 'name', { value: name });
+          return name;
+        }
+      });
+    }
+  }
+
+  function _ensureClassList() {
+    if (!('classList' in document.createElement('_')) || document.createElementNS && !('classList' in document.createElementNS('http://www.w3.org/2000/svg', 'g'))) {
+      (function () {
+        var protoProp = 'prototype';
+        var strTrim = String.prototype.trim;
+        var arrIndexOf = Array.prototype.indexOf;
+        var emptyArray = [];
+
+        var DOMEx = function DOMEx(type, message) {
+          this.name = type;
+          this.code = DOMException[type];
+          this.message = message;
+        };
+
+        var checkTokenAndGetIndex = function checkTokenAndGetIndex(classList, token) {
+          if (token === '') {
+            throw new DOMEx('SYNTAX_ERR', 'An invalid or illegal string was specified');
+          }
+
+          if (/\s/.test(token)) {
+            throw new DOMEx('INVALID_CHARACTER_ERR', 'String contains an invalid character');
+          }
+
+          return arrIndexOf.call(classList, token);
+        };
+
+        var ClassList = function ClassList(elem) {
+          var trimmedClasses = strTrim.call(elem.getAttribute('class') || '');
+          var classes = trimmedClasses ? trimmedClasses.split(/\s+/) : emptyArray;
+
+          for (var i = 0, ii = classes.length; i < ii; ++i) {
+            this.push(classes[i]);
+          }
+
+          this._updateClassName = function () {
+            elem.setAttribute('class', this.toString());
+          };
+        };
+
+        var classListProto = ClassList[protoProp] = [];
+
+        DOMEx[protoProp] = Error[protoProp];
+
+        classListProto.item = function (i) {
+          return this[i] || null;
+        };
+
+        classListProto.contains = function (token) {
+          token += '';
+          return checkTokenAndGetIndex(this, token) !== -1;
+        };
+
+        classListProto.add = function () {
+          var tokens = arguments;
+          var i = 0;
+          var ii = tokens.length;
+          var token = void 0;
+          var updated = false;
+
+          do {
+            token = tokens[i] + '';
+            if (checkTokenAndGetIndex(this, token) === -1) {
+              this.push(token);
+              updated = true;
+            }
+          } while (++i < ii);
+
+          if (updated) {
+            this._updateClassName();
+          }
+        };
+
+        classListProto.remove = function () {
+          var tokens = arguments;
+          var i = 0;
+          var ii = tokens.length;
+          var token = void 0;
+          var updated = false;
+          var index = void 0;
+
+          do {
+            token = tokens[i] + '';
+            index = checkTokenAndGetIndex(this, token);
+            while (index !== -1) {
+              this.splice(index, 1);
+              updated = true;
+              index = checkTokenAndGetIndex(this, token);
+            }
+          } while (++i < ii);
+
+          if (updated) {
+            this._updateClassName();
+          }
+        };
+
+        classListProto.toggle = function (token, force) {
+          token += '';
+
+          var result = this.contains(token);
+          var method = result ? force !== true && 'remove' : force !== false && 'add';
+
+          if (method) {
+            this[method](token);
+          }
+
+          if (force === true || force === false) {
+            return force;
+          }
+
+          return !result;
+        };
+
+        classListProto.toString = function () {
+          return this.join(' ');
+        };
+
+        Object.defineProperty(Element.prototype, 'classList', {
+          get: function get() {
+            return new ClassList(this);
+          },
+          enumerable: true,
+          configurable: true
+        });
+      })();
+    } else {
+      var testElement = document.createElement('_');
+      testElement.classList.add('c1', 'c2');
+
+      if (!testElement.classList.contains('c2')) {
+        var createMethod = function createMethod(method) {
+          var original = DOMTokenList.prototype[method];
+
+          DOMTokenList.prototype[method] = function (token) {
+            for (var i = 0, ii = arguments.length; i < ii; ++i) {
+              token = arguments[i];
+              original.call(this, token);
+            }
+          };
+        };
+
+        createMethod('add');
+        createMethod('remove');
+      }
+
+      testElement.classList.toggle('c3', false);
+
+      if (testElement.classList.contains('c3')) {
+        (function () {
+          var _toggle = DOMTokenList.prototype.toggle;
+
+          DOMTokenList.prototype.toggle = function (token, force) {
+            if (1 in arguments && !this.contains(token) === !force) {
+              return force;
+            }
+
+            return _toggle.call(this, token);
+          };
+        })();
+      }
+
+      testElement = null;
+    }
+  }
+
+  function _ensurePerformance() {
+    // @license http://opensource.org/licenses/MIT
+    if ('performance' in window === false) {
+      window.performance = {};
+    }
+
+    if ('now' in window.performance === false) {
+      (function () {
+        var nowOffset = Date.now();
+
+        if (performance.timing && performance.timing.navigationStart) {
+          nowOffset = performance.timing.navigationStart;
+        }
+
+        window.performance.now = function now() {
+          return Date.now() - nowOffset;
+        };
+      })();
+    }
+
+    _PLATFORM.performance = window.performance;
+  }
+
+  function _ensureCustomEvent() {
+    if (!window.CustomEvent || typeof window.CustomEvent !== 'function') {
+      var _CustomEvent = function _CustomEvent(event, params) {
+        params = params || {
+          bubbles: false,
+          cancelable: false,
+          detail: undefined
+        };
+
+        var evt = document.createEvent('CustomEvent');
+        evt.initCustomEvent(event, params.bubbles, params.cancelable, params.detail);
+        return evt;
+      };
+
+      _CustomEvent.prototype = window.Event.prototype;
+      window.CustomEvent = _CustomEvent;
+    }
+  }
+
+  function _ensureElementMatches() {
+    if (Element && !Element.prototype.matches) {
+      var proto = Element.prototype;
+      proto.matches = proto.matchesSelector || proto.mozMatchesSelector || proto.msMatchesSelector || proto.oMatchesSelector || proto.webkitMatchesSelector;
+    }
+  }
+
+  var _FEATURE = exports._FEATURE = {};
+
+  _FEATURE.shadowDOM = function () {
+    return !!HTMLElement.prototype.attachShadow;
+  }();
+
+  _FEATURE.scopedCSS = function () {
+    return 'scoped' in document.createElement('style');
+  }();
+
+  _FEATURE.htmlTemplateElement = function () {
+    return 'content' in document.createElement('template');
+  }();
+
+  _FEATURE.mutationObserver = function () {
+    return !!(window.MutationObserver || window.WebKitMutationObserver);
+  }();
+
+  function _ensureHTMLTemplateElement() {
+    function isSVGTemplate(el) {
+      return el.tagName === 'template' && el.namespaceURI === 'http://www.w3.org/2000/svg';
+    }
+
+    function fixSVGTemplateElement(el) {
+      var template = el.ownerDocument.createElement('template');
+      var attrs = el.attributes;
+      var length = attrs.length;
+      var attr = void 0;
+
+      el.parentNode.insertBefore(template, el);
+
+      while (length-- > 0) {
+        attr = attrs[length];
+        template.setAttribute(attr.name, attr.value);
+        el.removeAttribute(attr.name);
+      }
+
+      el.parentNode.removeChild(el);
+
+      return fixHTMLTemplateElement(template);
+    }
+
+    function fixHTMLTemplateElement(template) {
+      var content = template.content = document.createDocumentFragment();
+      var child = void 0;
+
+      while (child = template.firstChild) {
+        content.appendChild(child);
+      }
+
+      return template;
+    }
+
+    function fixHTMLTemplateElementRoot(template) {
+      var content = fixHTMLTemplateElement(template).content;
+      var childTemplates = content.querySelectorAll('template');
+
+      for (var i = 0, ii = childTemplates.length; i < ii; ++i) {
+        var child = childTemplates[i];
+
+        if (isSVGTemplate(child)) {
+          fixSVGTemplateElement(child);
+        } else {
+          fixHTMLTemplateElement(child);
+        }
+      }
+
+      return template;
+    }
+
+    if (_FEATURE.htmlTemplateElement) {
+      _FEATURE.ensureHTMLTemplateElement = function (template) {
+        return template;
+      };
+    } else {
+      _FEATURE.ensureHTMLTemplateElement = fixHTMLTemplateElementRoot;
+    }
+  }
+
+  var shadowPoly = window.ShadowDOMPolyfill || null;
+
+  var _DOM = exports._DOM = {
+    Element: Element,
+    SVGElement: SVGElement,
+    boundary: 'aurelia-dom-boundary',
+    addEventListener: function addEventListener(eventName, callback, capture) {
+      document.addEventListener(eventName, callback, capture);
+    },
+    removeEventListener: function removeEventListener(eventName, callback, capture) {
+      document.removeEventListener(eventName, callback, capture);
+    },
+    adoptNode: function adoptNode(node) {
+      return document.adoptNode(node, true);
+    },
+    createElement: function createElement(tagName) {
+      return document.createElement(tagName);
+    },
+    createTextNode: function createTextNode(text) {
+      return document.createTextNode(text);
+    },
+    createComment: function createComment(text) {
+      return document.createComment(text);
+    },
+    createDocumentFragment: function createDocumentFragment() {
+      return document.createDocumentFragment();
+    },
+    createMutationObserver: function createMutationObserver(callback) {
+      return new (window.MutationObserver || window.WebKitMutationObserver)(callback);
+    },
+    createCustomEvent: function createCustomEvent(eventType, options) {
+      return new window.CustomEvent(eventType, options);
+    },
+    dispatchEvent: function dispatchEvent(evt) {
+      document.dispatchEvent(evt);
+    },
+    getComputedStyle: function getComputedStyle(element) {
+      return window.getComputedStyle(element);
+    },
+    getElementById: function getElementById(id) {
+      return document.getElementById(id);
+    },
+    querySelectorAll: function querySelectorAll(query) {
+      return document.querySelectorAll(query);
+    },
+    nextElementSibling: function nextElementSibling(element) {
+      if (element.nextElementSibling) {
+        return element.nextElementSibling;
+      }
+      do {
+        element = element.nextSibling;
+      } while (element && element.nodeType !== 1);
+      return element;
+    },
+    createTemplateFromMarkup: function createTemplateFromMarkup(markup) {
+      var parser = document.createElement('div');
+      parser.innerHTML = markup;
+
+      var temp = parser.firstElementChild;
+      if (!temp || temp.nodeName !== 'TEMPLATE') {
+        throw new Error('Template markup must be wrapped in a <template> element e.g. <template> <!-- markup here --> </template>');
+      }
+
+      return _FEATURE.ensureHTMLTemplateElement(temp);
+    },
+    appendNode: function appendNode(newNode, parentNode) {
+      (parentNode || document.body).appendChild(newNode);
+    },
+    replaceNode: function replaceNode(newNode, node, parentNode) {
+      if (node.parentNode) {
+        node.parentNode.replaceChild(newNode, node);
+      } else if (shadowPoly !== null) {
+        shadowPoly.unwrap(parentNode).replaceChild(shadowPoly.unwrap(newNode), shadowPoly.unwrap(node));
+      } else {
+        parentNode.replaceChild(newNode, node);
+      }
+    },
+    removeNode: function removeNode(node, parentNode) {
+      if (node.parentNode) {
+        node.parentNode.removeChild(node);
+      } else if (parentNode) {
+        if (shadowPoly !== null) {
+          shadowPoly.unwrap(parentNode).removeChild(shadowPoly.unwrap(node));
+        } else {
+          parentNode.removeChild(node);
+        }
+      }
+    },
+    injectStyles: function injectStyles(styles, destination, prepend) {
+      var node = document.createElement('style');
+      node.innerHTML = styles;
+      node.type = 'text/css';
+
+      destination = destination || document.head;
+
+      if (prepend && destination.childNodes.length > 0) {
+        destination.insertBefore(node, destination.childNodes[0]);
+      } else {
+        destination.appendChild(node);
+      }
+
+      return node;
+    }
+  };
+
+  function initialize() {
+    if (_aureliaPal.isInitialized) {
+      return;
+    }
+
+    _ensureCustomEvent();
+    _ensureFunctionName();
+    _ensureHTMLTemplateElement();
+    _ensureElementMatches();
+    _ensureClassList();
+    _ensurePerformance();
+
+    (0, _aureliaPal.initializePAL)(function (platform, feature, dom) {
+      Object.assign(platform, _PLATFORM);
+      Object.assign(feature, _FEATURE);
+      Object.assign(dom, _DOM);
+
+      (function (global) {
+        global.console = global.console || {};
+        var con = global.console;
+        var prop = void 0;
+        var method = void 0;
+        var empty = {};
+        var dummy = function dummy() {};
+        var properties = 'memory'.split(',');
+        var methods = ('assert,clear,count,debug,dir,dirxml,error,exception,group,' + 'groupCollapsed,groupEnd,info,log,markTimeline,profile,profiles,profileEnd,' + 'show,table,time,timeEnd,timeline,timelineEnd,timeStamp,trace,warn').split(',');
+        while (prop = properties.pop()) {
+          if (!con[prop]) con[prop] = empty;
+        }while (method = methods.pop()) {
+          if (!con[method]) con[method] = dummy;
+        }
+      })(platform.global);
+
+      if (platform.global.console && _typeof(console.log) === 'object') {
+        ['log', 'info', 'warn', 'error', 'assert', 'dir', 'clear', 'profile', 'profileEnd'].forEach(function (method) {
+          console[method] = this.bind(console[method], console);
+        }, Function.prototype.call);
+      }
+
+      Object.defineProperty(dom, 'title', {
+        get: function get() {
+          return document.title;
+        },
+        set: function set(value) {
+          document.title = value;
+        }
+      });
+
+      Object.defineProperty(dom, 'activeElement', {
+        get: function get() {
+          return document.activeElement;
+        }
+      });
+
+      Object.defineProperty(platform, 'XMLHttpRequest', {
+        get: function get() {
+          return platform.global.XMLHttpRequest;
+        }
+      });
+    });
+  }
+});
 define('aurelia-route-recognizer',['exports', 'aurelia-path'], function (exports, _aureliaPath) {
   'use strict';
 
@@ -15691,8 +15844,12 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     NavigationInstruction.prototype._buildTitle = function _buildTitle() {
       var separator = arguments.length <= 0 || arguments[0] === undefined ? ' | ' : arguments[0];
 
-      var title = this.config.navModel.title || '';
+      var title = '';
       var childTitles = [];
+
+      if (this.config.navModel.title) {
+        title = this.router.transformTitle(this.config.navModel.title);
+      }
 
       for (var viewPortName in this.viewPortInstructions) {
         var _viewPortInstruction = this.viewPortInstructions[viewPortName];
@@ -15710,7 +15867,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       }
 
       if (this.router.title) {
-        title += (title ? separator : '') + this.router.title;
+        title += (title ? separator : '') + this.router.transformTitle(this.router.title);
       }
 
       return title;
@@ -15832,6 +15989,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       return this.addPipelineStep('postRender', step);
     };
 
+    RouterConfiguration.prototype.fallbackRoute = function fallbackRoute(fragment) {
+      this._fallbackRoute = fragment;
+      return this;
+    };
+
     RouterConfiguration.prototype.map = function map(route) {
       if (Array.isArray(route)) {
         route.forEach(this.map.bind(this));
@@ -15887,6 +16049,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
 
       if (this.unknownRouteConfig) {
         router.handleUnknownRoutes(this.unknownRouteConfig);
+      }
+
+      if (this._fallbackRoute) {
+        router.fallbackRoute = this._fallbackRoute;
       }
 
       router.options = this.options;
@@ -16072,10 +16238,19 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
 
   var Router = exports.Router = function () {
     function Router(container, history) {
+      var _this2 = this;
+
       
 
       this.parent = null;
       this.options = {};
+
+      this.transformTitle = function (title) {
+        if (_this2.parent) {
+          return _this2.parent.transformTitle(title);
+        }
+        return title;
+      };
 
       this.container = container;
       this.history = history;
@@ -16083,7 +16258,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     Router.prototype.reset = function reset() {
-      var _this2 = this;
+      var _this3 = this;
 
       this.viewPorts = {};
       this.routes = [];
@@ -16096,7 +16271,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       this._recognizer = new _aureliaRouteRecognizer.RouteRecognizer();
       this._childRecognizer = new _aureliaRouteRecognizer.RouteRecognizer();
       this._configuredPromise = new Promise(function (resolve) {
-        _this2._resolveConfiguredPromise = resolve;
+        _this3._resolveConfiguredPromise = resolve;
       });
     };
 
@@ -16110,7 +16285,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype.configure = function configure(callbackOrConfig) {
-      var _this3 = this;
+      var _this4 = this;
 
       this.isConfigured = true;
 
@@ -16126,9 +16301,9 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
           config = c;
         }
 
-        config.exportToRouter(_this3);
-        _this3.isConfigured = true;
-        _this3._resolveConfiguredPromise();
+        config.exportToRouter(_this4);
+        _this4.isConfigured = true;
+        _this4._resolveConfiguredPromise();
       });
     };
 
@@ -16253,14 +16428,14 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype.handleUnknownRoutes = function handleUnknownRoutes(config) {
-      var _this4 = this;
+      var _this5 = this;
 
       if (!config) {
         throw new Error('Invalid unknown route handler');
       }
 
       this.catchAllHandler = function (instruction) {
-        return _this4._createRouteConfig(config, instruction).then(function (c) {
+        return _this5._createRouteConfig(config, instruction).then(function (c) {
           instruction.config = c;
           return instruction;
         });
@@ -16354,7 +16529,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype._createRouteConfig = function _createRouteConfig(config, instruction) {
-      var _this5 = this;
+      var _this6 = this;
 
       return Promise.resolve(config).then(function (c) {
         if (typeof c === 'string') {
@@ -16368,10 +16543,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         return typeof c === 'string' ? { moduleId: c } : c;
       }).then(function (c) {
         c.route = instruction.params.path;
-        validateRouteConfig(c, _this5.routes);
+        validateRouteConfig(c, _this6.routes);
 
         if (!c.navModel) {
-          c.navModel = _this5.createNavModel(c);
+          c.navModel = _this6.createNavModel(c);
         }
 
         return c;
@@ -16834,10 +17009,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     PipelineSlot.prototype.getSteps = function getSteps() {
-      var _this6 = this;
+      var _this7 = this;
 
       return this.steps.map(function (x) {
-        return _this6.container.get(x);
+        return _this7.container.get(x);
       });
     };
 
@@ -16857,11 +17032,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     PipelineProvider.prototype.createPipeline = function createPipeline() {
-      var _this7 = this;
+      var _this8 = this;
 
       var pipeline = new Pipeline();
       this.steps.forEach(function (step) {
-        return pipeline.addStep(_this7.container.get(step));
+        return pipeline.addStep(_this8.container.get(step));
       });
       return pipeline;
     };
@@ -16925,11 +17100,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     function AppRouter(container, history, pipelineProvider, events) {
       
 
-      var _this8 = _possibleConstructorReturn(this, _Router.call(this, container, history));
+      var _this9 = _possibleConstructorReturn(this, _Router.call(this, container, history));
 
-      _this8.pipelineProvider = pipelineProvider;
-      _this8.events = events;
-      return _this8;
+      _this9.pipelineProvider = pipelineProvider;
+      _this9.events = events;
+      return _this9;
     }
 
     AppRouter.prototype.reset = function reset() {
@@ -16943,35 +17118,35 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     AppRouter.prototype.loadUrl = function loadUrl(url) {
-      var _this9 = this;
+      var _this10 = this;
 
       return this._createNavigationInstruction(url).then(function (instruction) {
-        return _this9._queueInstruction(instruction);
+        return _this10._queueInstruction(instruction);
       }).catch(function (error) {
         logger.error(error);
-        restorePreviousLocation(_this9);
+        restorePreviousLocation(_this10);
       });
     };
 
     AppRouter.prototype.registerViewPort = function registerViewPort(viewPort, name) {
-      var _this10 = this;
+      var _this11 = this;
 
       _Router.prototype.registerViewPort.call(this, viewPort, name);
 
       if (!this.isActive) {
         var _ret6 = function () {
-          var viewModel = _this10._findViewModel(viewPort);
+          var viewModel = _this11._findViewModel(viewPort);
           if ('configureRouter' in viewModel) {
-            if (!_this10.isConfigured) {
+            if (!_this11.isConfigured) {
               var _ret7 = function () {
-                var resolveConfiguredPromise = _this10._resolveConfiguredPromise;
-                _this10._resolveConfiguredPromise = function () {};
+                var resolveConfiguredPromise = _this11._resolveConfiguredPromise;
+                _this11._resolveConfiguredPromise = function () {};
                 return {
                   v: {
-                    v: _this10.configure(function (config) {
-                      return viewModel.configureRouter(config, _this10);
+                    v: _this11.configure(function (config) {
+                      return viewModel.configureRouter(config, _this11);
                     }).then(function () {
-                      _this10.activate();
+                      _this11.activate();
                       resolveConfiguredPromise();
                     })
                   }
@@ -16981,7 +17156,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
               if ((typeof _ret7 === 'undefined' ? 'undefined' : _typeof(_ret7)) === "object") return _ret7.v;
             }
           } else {
-            _this10.activate();
+            _this11.activate();
           }
         }();
 
@@ -17010,53 +17185,53 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     AppRouter.prototype._queueInstruction = function _queueInstruction(instruction) {
-      var _this11 = this;
+      var _this12 = this;
 
       return new Promise(function (resolve) {
         instruction.resolve = resolve;
-        _this11._queue.unshift(instruction);
-        _this11._dequeueInstruction();
+        _this12._queue.unshift(instruction);
+        _this12._dequeueInstruction();
       });
     };
 
     AppRouter.prototype._dequeueInstruction = function _dequeueInstruction() {
-      var _this12 = this;
+      var _this13 = this;
 
       var instructionCount = arguments.length <= 0 || arguments[0] === undefined ? 0 : arguments[0];
 
       return Promise.resolve().then(function () {
-        if (_this12.isNavigating && !instructionCount) {
+        if (_this13.isNavigating && !instructionCount) {
           return undefined;
         }
 
-        var instruction = _this12._queue.shift();
-        _this12._queue.length = 0;
+        var instruction = _this13._queue.shift();
+        _this13._queue.length = 0;
 
         if (!instruction) {
           return undefined;
         }
 
-        _this12.isNavigating = true;
-        instruction.previousInstruction = _this12.currentInstruction;
+        _this13.isNavigating = true;
+        instruction.previousInstruction = _this13.currentInstruction;
 
         if (!instructionCount) {
-          _this12.events.publish('router:navigation:processing', { instruction: instruction });
-        } else if (instructionCount === _this12.maxInstructionCount - 1) {
+          _this13.events.publish('router:navigation:processing', { instruction: instruction });
+        } else if (instructionCount === _this13.maxInstructionCount - 1) {
           logger.error(instructionCount + 1 + ' navigation instructions have been attempted without success. Restoring last known good location.');
-          restorePreviousLocation(_this12);
-          return _this12._dequeueInstruction(instructionCount + 1);
-        } else if (instructionCount > _this12.maxInstructionCount) {
+          restorePreviousLocation(_this13);
+          return _this13._dequeueInstruction(instructionCount + 1);
+        } else if (instructionCount > _this13.maxInstructionCount) {
           throw new Error('Maximum navigation attempts exceeded. Giving up.');
         }
 
-        var pipeline = _this12.pipelineProvider.createPipeline();
+        var pipeline = _this13.pipelineProvider.createPipeline();
 
         return pipeline.run(instruction).then(function (result) {
-          return processResult(instruction, result, instructionCount, _this12);
+          return processResult(instruction, result, instructionCount, _this13);
         }).catch(function (error) {
           return { output: error instanceof Error ? error : new Error(error) };
         }).then(function (result) {
-          return resolveInstruction(instruction, result, !!instructionCount, _this12);
+          return resolveInstruction(instruction, result, !!instructionCount, _this13);
         });
       });
     };
@@ -17140,8 +17315,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     var previousLocation = router.history.previousLocation;
     if (previousLocation) {
       router.navigate(router.history.previousLocation, { trigger: false, replace: true });
+    } else if (router.fallbackRoute) {
+      router.navigate(router.fallbackRoute, { trigger: true, replace: true });
     } else {
-      logger.error('Router navigation failed, and no previous location could be restored.');
+      logger.error('Router navigation failed, and no previous location or fallbackRoute could be restored.');
     }
   }
 });
@@ -17884,7 +18061,7 @@ define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-
     return TemplatingRouteLoader;
   }(_aureliaRouter.RouteLoader)) || _class);
 });
-define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-injection', 'aurelia-templating', 'aurelia-router', 'aurelia-metadata', 'aurelia-pal'], function (exports, _aureliaDependencyInjection, _aureliaTemplating, _aureliaRouter, _aureliaMetadata, _aureliaPal) {
+define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-injection', 'aurelia-binding', 'aurelia-templating', 'aurelia-router', 'aurelia-metadata', 'aurelia-pal'], function (exports, _aureliaDependencyInjection, _aureliaBinding, _aureliaTemplating, _aureliaRouter, _aureliaMetadata, _aureliaPal) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
@@ -18058,49 +18235,55 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
     RouterView.prototype.swap = function swap(viewPortInstruction) {
       var _this2 = this;
 
+      var layoutInstruction = viewPortInstruction.layoutInstruction;
+
       var work = function work() {
         var previousView = _this2.view;
         var swapStrategy = void 0;
         var viewSlot = _this2.viewSlot;
-        var layoutInstruction = viewPortInstruction.layoutInstruction;
 
         swapStrategy = _this2.swapOrder in swapStrategies ? swapStrategies[_this2.swapOrder] : swapStrategies.after;
 
         swapStrategy(viewSlot, previousView, function () {
-          var waitForView = void 0;
-
-          if (layoutInstruction) {
-            if (!layoutInstruction.viewModel) {
-              layoutInstruction.viewModel = {};
-            }
-
-            waitForView = _this2.compositionEngine.createController(layoutInstruction).then(function (layout) {
-              _aureliaTemplating.ShadowDOM.distributeView(viewPortInstruction.controller.view, layout.slots || layout.view.slots);
-              return layout.view || layout;
-            });
-          } else {
-            waitForView = Promise.resolve(viewPortInstruction.controller.view);
-          }
-
-          return waitForView.then(function (newView) {
-            _this2.view = newView;
-            return viewSlot.add(newView);
+          return Promise.resolve().then(function () {
+            return viewSlot.add(_this2.view);
           }).then(function () {
             _this2._notify();
           });
         });
       };
 
-      viewPortInstruction.controller.automate(this.overrideContext, this.owningView);
+      var ready = function ready(owningView) {
+        viewPortInstruction.controller.automate(_this2.overrideContext, owningView);
+        if (_this2.compositionTransactionOwnershipToken) {
+          return _this2.compositionTransactionOwnershipToken.waitForCompositionComplete().then(function () {
+            _this2.compositionTransactionOwnershipToken = null;
+            return work();
+          });
+        }
 
-      if (this.compositionTransactionOwnershipToken) {
-        return this.compositionTransactionOwnershipToken.waitForCompositionComplete().then(function () {
-          _this2.compositionTransactionOwnershipToken = null;
-          return work();
+        return work();
+      };
+
+      if (layoutInstruction) {
+        if (!layoutInstruction.viewModel) {
+          layoutInstruction.viewModel = {};
+        }
+
+        return this.compositionEngine.createController(layoutInstruction).then(function (controller) {
+          _aureliaTemplating.ShadowDOM.distributeView(viewPortInstruction.controller.view, controller.slots || controller.view.slots);
+          controller.automate((0, _aureliaBinding.createOverrideContext)(layoutInstruction.viewModel), _this2.owningView);
+          controller.view.children.push(viewPortInstruction.controller.view);
+          return controller.view || controller;
+        }).then(function (newView) {
+          _this2.view = newView;
+          return ready(newView);
         });
       }
 
-      return work();
+      this.view = viewPortInstruction.controller.view;
+
+      return ready(this.owningView);
     };
 
     RouterView.prototype._notify = function _notify() {
@@ -18192,7 +18375,13 @@ define('aurelia-templating-router/route-href',['exports', 'aurelia-templating', 
         }
 
         var href = _this.router.generate(_this.route, _this.params);
-        _this.element.setAttribute(_this.attribute, href);
+
+        if (_this.element.au.controller) {
+          _this.element.au.controller.viewModel[_this.attribute] = href;
+        } else {
+          _this.element.setAttribute(_this.attribute, href);
+        }
+
         return null;
       }).catch(function (reason) {
         logger.error(reason);
@@ -20605,48 +20794,7 @@ define('aurelia-templating-resources/aurelia-templating-resources',['exports', '
 });
 define('aurelia-templating-resources', ['aurelia-templating-resources/aurelia-templating-resources'], function (main) { return main; });
 
-define('aurelia-validation/validate-trigger',["require", "exports"], function (require, exports) {
-    "use strict";
-    /**
-     * Validation triggers.
-     */
-    exports.validateTrigger = {
-        /**
-         * Manual validation.  Use the controller's `validate()` and  `reset()` methods
-         * to validate all bindings.
-         */
-        manual: 0,
-        /**
-         * Validate the binding when the binding's target element fires a DOM "blur" event.
-         */
-        blur: 1,
-        /**
-         * Validate the binding when it updates the model due to a change in the view.
-         */
-        change: 2,
-        /**
-         * Validate the binding when the binding's target element fires a DOM "blur" event and
-         * when it updates the model due to a change in the view.
-         */
-        changeOrBlur: 3
-    };
-});
-
-define('aurelia-validation/validator',["require", "exports"], function (require, exports) {
-    "use strict";
-    /**
-     * Validates.
-     * Responsible for validating objects and properties.
-     */
-    var Validator = (function () {
-        function Validator() {
-        }
-        return Validator;
-    }());
-    exports.Validator = Validator;
-});
-
-define('aurelia-validation/property-info',["require", "exports", 'aurelia-binding'], function (require, exports, aurelia_binding_1) {
+define('aurelia-validation/property-info',["require", "exports", "aurelia-binding"], function (require, exports, aurelia_binding_1) {
     "use strict";
     function getObject(expression, objectExpression, source) {
         var value = objectExpression.evaluate(source, null);
@@ -20692,41 +20840,82 @@ define('aurelia-validation/property-info',["require", "exports", 'aurelia-bindin
     exports.getPropertyInfo = getPropertyInfo;
 });
 
-define('aurelia-validation/validation-error',["require", "exports"], function (require, exports) {
+define('aurelia-validation/validate-trigger',["require", "exports"], function (require, exports) {
     "use strict";
     /**
-     * A validation error.
+     * Validation triggers.
      */
-    var ValidationError = (function () {
+    exports.validateTrigger = {
         /**
-         * @param rule The rule associated with the error. Validator implementation specific.
-         * @param message The error message.
-         * @param object The invalid object
-         * @param propertyName The name of the invalid property. Optional.
+         * Manual validation.  Use the controller's `validate()` and  `reset()` methods
+         * to validate all bindings.
          */
-        function ValidationError(rule, message, object, propertyName) {
-            if (propertyName === void 0) { propertyName = null; }
-            this.rule = rule;
-            this.message = message;
-            this.object = object;
-            this.propertyName = propertyName;
-            this.id = ValidationError.nextId++;
-        }
-        ValidationError.prototype.toString = function () {
-            return this.message;
-        };
-        ValidationError.nextId = 0;
-        return ValidationError;
-    }());
-    exports.ValidationError = ValidationError;
+        manual: 0,
+        /**
+         * Validate the binding when the binding's target element fires a DOM "blur" event.
+         */
+        blur: 1,
+        /**
+         * Validate the binding when it updates the model due to a change in the view.
+         */
+        change: 2,
+        /**
+         * Validate the binding when the binding's target element fires a DOM "blur" event and
+         * when it updates the model due to a change in the view.
+         */
+        changeOrBlur: 3
+    };
 });
 
-define('aurelia-validation/validation-controller',["require", "exports", './validator', './validate-trigger', './property-info', './validation-error'], function (require, exports, validator_1, validate_trigger_1, property_info_1, validation_error_1) {
+define('aurelia-validation/validator',["require", "exports"], function (require, exports) {
+    "use strict";
+    /**
+     * Validates objects and properties.
+     */
+    var Validator = (function () {
+        function Validator() {
+        }
+        return Validator;
+    }());
+    exports.Validator = Validator;
+});
+
+define('aurelia-validation/validate-result',["require", "exports"], function (require, exports) {
+    "use strict";
+    /**
+     * The result of validating an individual validation rule.
+     */
+    var ValidateResult = (function () {
+        /**
+         * @param rule The rule associated with the result. Validator implementation specific.
+         * @param object The object that was validated.
+         * @param propertyName The name of the property that was validated.
+         * @param error The error, if the result is a validation error.
+         */
+        function ValidateResult(rule, object, propertyName, valid, message) {
+            if (message === void 0) { message = null; }
+            this.rule = rule;
+            this.object = object;
+            this.propertyName = propertyName;
+            this.valid = valid;
+            this.message = message;
+            this.id = ValidateResult.nextId++;
+        }
+        ValidateResult.prototype.toString = function () {
+            return this.valid ? 'Valid.' : this.message;
+        };
+        return ValidateResult;
+    }());
+    ValidateResult.nextId = 0;
+    exports.ValidateResult = ValidateResult;
+});
+
+define('aurelia-validation/validation-controller',["require", "exports", "./validator", "./validate-trigger", "./property-info", "./validate-result"], function (require, exports, validator_1, validate_trigger_1, property_info_1, validate_result_1) {
     "use strict";
     /**
      * Orchestrates validation.
      * Manages a set of bindings, renderers and objects.
-     * Exposes the current list of validation errors for binding purposes.
+     * Exposes the current list of validation results for binding purposes.
      */
     var ValidationController = (function () {
         function ValidationController(validator) {
@@ -20736,14 +20925,18 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             // Renderers that have been added to the controller instance.
             this.renderers = [];
             /**
-             * Errors that have been rendered by the controller.
+             * Validation results that have been rendered by the controller.
+             */
+            this.results = [];
+            /**
+             * Validation errors that have been rendered by the controller.
              */
             this.errors = [];
             /**
              *  Whether the controller is currently validating.
              */
             this.validating = false;
-            // Elements related to errors that have been rendered.
+            // Elements related to validation results that have been rendered.
             this.elements = new Map();
             // Objects that have been added to the controller instance (entity-style validation).
             this.objects = new Map();
@@ -20768,22 +20961,23 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
          */
         ValidationController.prototype.removeObject = function (object) {
             this.objects.delete(object);
-            this.processErrorDelta('reset', this.errors.filter(function (error) { return error.object === object; }), []);
+            this.processResultDelta('reset', this.results.filter(function (result) { return result.object === object; }), []);
         };
         /**
-         * Adds and renders a ValidationError.
+         * Adds and renders an error.
          */
         ValidationController.prototype.addError = function (message, object, propertyName) {
-            var error = new validation_error_1.ValidationError({}, message, object, propertyName);
-            this.processErrorDelta('validate', [], [error]);
-            return error;
+            if (propertyName === void 0) { propertyName = null; }
+            var result = new validate_result_1.ValidateResult({}, object, propertyName, false, message);
+            this.processResultDelta('validate', [], [result]);
+            return result;
         };
         /**
-         * Removes and unrenders a ValidationError.
+         * Removes and unrenders an error.
          */
-        ValidationController.prototype.removeError = function (error) {
-            if (this.errors.indexOf(error) !== -1) {
-                this.processErrorDelta('reset', [error], []);
+        ValidationController.prototype.removeError = function (result) {
+            if (this.results.indexOf(result) !== -1) {
+                this.processResultDelta('reset', [result], []);
             }
         };
         /**
@@ -20795,7 +20989,7 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             this.renderers.push(renderer);
             renderer.render({
                 kind: 'validate',
-                render: this.errors.map(function (error) { return ({ error: error, elements: _this.elements.get(error) }); }),
+                render: this.results.map(function (result) { return ({ result: result, elements: _this.elements.get(result) }); }),
                 unrender: []
             });
         };
@@ -20809,7 +21003,7 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             renderer.render({
                 kind: 'reset',
                 render: [],
-                unrender: this.errors.map(function (error) { return ({ error: error, elements: _this.elements.get(error) }); })
+                unrender: this.results.map(function (result) { return ({ result: result, elements: _this.elements.get(result) }); })
             });
         };
         /**
@@ -20831,7 +21025,7 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
         };
         /**
          * Interprets the instruction and returns a predicate that will identify
-         * relevant errors in the list of rendered errors.
+         * relevant results in the list of rendered validation results.
          */
         ValidationController.prototype.getInstructionPredicate = function (instruction) {
             var _this = this;
@@ -20854,7 +21048,7 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             }
         };
         /**
-         * Validates and renders errors.
+         * Validates and renders results.
          * @param instruction Optional. Instructions on what to validate. If undefined, all
          * objects and bindings will be validated.
          */
@@ -20892,39 +21086,45 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
                         }
                         promises.push(_this.validator.validateProperty(propertyInfo.object, propertyInfo.propertyName, rules));
                     }
-                    return Promise.all(promises).then(function (errorSets) { return errorSets.reduce(function (a, b) { return a.concat(b); }, []); });
+                    return Promise.all(promises).then(function (resultSets) { return resultSets.reduce(function (a, b) { return a.concat(b); }, []); });
                 };
             }
-            // Wait for any existing validation to finish, execute the instruction, render the errors.
+            // Wait for any existing validation to finish, execute the instruction, render the results.
             this.validating = true;
-            var result = this.finishValidating
+            var returnPromise = this.finishValidating
                 .then(execute)
-                .then(function (newErrors) {
+                .then(function (newResults) {
                 var predicate = _this.getInstructionPredicate(instruction);
-                var oldErrors = _this.errors.filter(predicate);
-                _this.processErrorDelta('validate', oldErrors, newErrors);
-                if (result === _this.finishValidating) {
+                var oldResults = _this.results.filter(predicate);
+                _this.processResultDelta('validate', oldResults, newResults);
+                if (returnPromise === _this.finishValidating) {
                     _this.validating = false;
                 }
-                return newErrors;
+                var result = {
+                    instruction: instruction,
+                    valid: newResults.find(function (x) { return !x.valid; }) === undefined,
+                    results: newResults
+                };
+                return result;
             })
-                .catch(function (error) {
+                .catch(function (exception) {
                 // recover, to enable subsequent calls to validate()
                 _this.validating = false;
                 _this.finishValidating = Promise.resolve();
-                return Promise.reject(error);
+                return Promise.reject(exception);
             });
-            this.finishValidating = result;
-            return result;
+            this.finishValidating = returnPromise;
+            return returnPromise;
         };
         /**
-         * Resets any rendered errors (unrenders).
-         * @param instruction Optional. Instructions on what to reset. If unspecified all rendered errors will be unrendered.
+         * Resets any rendered validation results (unrenders).
+         * @param instruction Optional. Instructions on what to reset. If unspecified all rendered results
+         * will be unrendered.
          */
         ValidationController.prototype.reset = function (instruction) {
             var predicate = this.getInstructionPredicate(instruction);
-            var oldErrors = this.errors.filter(predicate);
-            this.processErrorDelta('reset', oldErrors, []);
+            var oldResults = this.results.filter(predicate);
+            this.processResultDelta('reset', oldResults, []);
         };
         /**
          * Gets the elements associated with an object and propertyName (if any).
@@ -20941,54 +21141,66 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             }
             return elements;
         };
-        ValidationController.prototype.processErrorDelta = function (kind, oldErrors, newErrors) {
+        ValidationController.prototype.processResultDelta = function (kind, oldResults, newResults) {
             // prepare the instruction.
             var instruction = {
                 kind: kind,
                 render: [],
                 unrender: []
             };
-            // create a shallow copy of newErrors so we can mutate it without causing side-effects.
-            newErrors = newErrors.slice(0);
-            // create unrender instructions from the old errors.
-            var _loop_1 = function(oldError) {
-                // get the elements associated with the old error.
-                var elements = this_1.elements.get(oldError);
-                // remove the old error from the element map.
-                this_1.elements.delete(oldError);
+            // create a shallow copy of newResults so we can mutate it without causing side-effects.
+            newResults = newResults.slice(0);
+            var _loop_1 = function (oldResult) {
+                // get the elements associated with the old result.
+                var elements = this_1.elements.get(oldResult);
+                // remove the old result from the element map.
+                this_1.elements.delete(oldResult);
                 // create the unrender instruction.
-                instruction.unrender.push({ error: oldError, elements: elements });
-                // determine if there's a corresponding new error for the old error we are unrendering.
-                var newErrorIndex = newErrors.findIndex(function (x) { return x.rule === oldError.rule && x.object === oldError.object && x.propertyName === oldError.propertyName; });
-                if (newErrorIndex === -1) {
-                    // no corresponding new error... simple remove.
-                    this_1.errors.splice(this_1.errors.indexOf(oldError), 1);
+                instruction.unrender.push({ result: oldResult, elements: elements });
+                // determine if there's a corresponding new result for the old result we are unrendering.
+                var newResultIndex = newResults.findIndex(function (x) { return x.rule === oldResult.rule && x.object === oldResult.object && x.propertyName === oldResult.propertyName; });
+                if (newResultIndex === -1) {
+                    // no corresponding new result... simple remove.
+                    this_1.results.splice(this_1.results.indexOf(oldResult), 1);
+                    if (!oldResult.valid) {
+                        this_1.errors.splice(this_1.errors.indexOf(oldResult), 1);
+                    }
                 }
                 else {
-                    // there is a corresponding new error...        
-                    var newError = newErrors.splice(newErrorIndex, 1)[0];
-                    // get the elements that are associated with the new error.
-                    var elements_1 = this_1.getAssociatedElements(newError);
-                    this_1.elements.set(newError, elements_1);
-                    // create a render instruction for the new error.
-                    instruction.render.push({ error: newError, elements: elements_1 });
-                    // do an in-place replacement of the old error with the new error.
-                    // this ensures any repeats bound to this.errors will not thrash.
-                    this_1.errors.splice(this_1.errors.indexOf(oldError), 1, newError);
+                    // there is a corresponding new result...        
+                    var newResult = newResults.splice(newResultIndex, 1)[0];
+                    // get the elements that are associated with the new result.
+                    var elements_1 = this_1.getAssociatedElements(newResult);
+                    this_1.elements.set(newResult, elements_1);
+                    // create a render instruction for the new result.
+                    instruction.render.push({ result: newResult, elements: elements_1 });
+                    // do an in-place replacement of the old result with the new result.
+                    // this ensures any repeats bound to this.results will not thrash.
+                    this_1.results.splice(this_1.results.indexOf(oldResult), 1, newResult);
+                    if (newResult.valid) {
+                        this_1.errors.splice(this_1.errors.indexOf(oldResult), 1);
+                    }
+                    else {
+                        this_1.errors.splice(this_1.errors.indexOf(oldResult), 1, newResult);
+                    }
                 }
             };
             var this_1 = this;
-            for (var _i = 0, oldErrors_1 = oldErrors; _i < oldErrors_1.length; _i++) {
-                var oldError = oldErrors_1[_i];
-                _loop_1(oldError);
+            // create unrender instructions from the old results.
+            for (var _i = 0, oldResults_1 = oldResults; _i < oldResults_1.length; _i++) {
+                var oldResult = oldResults_1[_i];
+                _loop_1(oldResult);
             }
-            // create render instructions from the remaining new errors.
-            for (var _a = 0, newErrors_1 = newErrors; _a < newErrors_1.length; _a++) {
-                var error = newErrors_1[_a];
-                var elements = this.getAssociatedElements(error);
-                instruction.render.push({ error: error, elements: elements });
-                this.elements.set(error, elements);
-                this.errors.push(error);
+            // create render instructions from the remaining new results.
+            for (var _a = 0, newResults_1 = newResults; _a < newResults_1.length; _a++) {
+                var result = newResults_1[_a];
+                var elements = this.getAssociatedElements(result);
+                instruction.render.push({ result: result, elements: elements });
+                this.elements.set(result, elements);
+                this.results.push(result);
+                if (!result.valid) {
+                    this.errors.push(result);
+                }
             }
             // render.
             for (var _b = 0, _c = this.renderers; _b < _c.length; _b++) {
@@ -21017,7 +21229,7 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             this.validate({ object: object, propertyName: propertyName, rules: rules });
         };
         /**
-         * Resets the errors for a property associated with a binding.
+         * Resets the results for a property associated with a binding.
          */
         ValidationController.prototype.resetBinding = function (binding) {
             var registeredBinding = this.bindings.get(binding);
@@ -21034,13 +21246,13 @@ define('aurelia-validation/validation-controller',["require", "exports", './vali
             var object = propertyInfo.object, propertyName = propertyInfo.propertyName;
             this.reset({ object: object, propertyName: propertyName });
         };
-        ValidationController.inject = [validator_1.Validator];
         return ValidationController;
     }());
+    ValidationController.inject = [validator_1.Validator];
     exports.ValidationController = ValidationController;
 });
 
-define('aurelia-validation/validate-binding-behavior-base',["require", "exports", 'aurelia-dependency-injection', 'aurelia-pal', './validation-controller', './validate-trigger'], function (require, exports, aurelia_dependency_injection_1, aurelia_pal_1, validation_controller_1, validate_trigger_1) {
+define('aurelia-validation/validate-binding-behavior-base',["require", "exports", "aurelia-dependency-injection", "aurelia-pal", "./validation-controller", "./validate-trigger"], function (require, exports, aurelia_dependency_injection_1, aurelia_pal_1, validation_controller_1, validate_trigger_1) {
     "use strict";
     /**
      * Binding behavior. Indicates the bound property should be validated.
@@ -21151,7 +21363,7 @@ var __extends = (this && this.__extends) || function (d, b) {
     function __() { this.constructor = d; }
     d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 };
-define('aurelia-validation/validate-binding-behavior',["require", "exports", 'aurelia-task-queue', './validate-trigger', './validate-binding-behavior-base'], function (require, exports, aurelia_task_queue_1, validate_trigger_1, validate_binding_behavior_base_1) {
+define('aurelia-validation/validate-binding-behavior',["require", "exports", "aurelia-task-queue", "./validate-trigger", "./validate-binding-behavior-base"], function (require, exports, aurelia_task_queue_1, validate_trigger_1, validate_binding_behavior_base_1) {
     "use strict";
     /**
      * Binding behavior. Indicates the bound property should be validated
@@ -21161,14 +21373,14 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", 'au
     var ValidateBindingBehavior = (function (_super) {
         __extends(ValidateBindingBehavior, _super);
         function ValidateBindingBehavior() {
-            _super.apply(this, arguments);
+            return _super.apply(this, arguments) || this;
         }
         ValidateBindingBehavior.prototype.getValidateTrigger = function (controller) {
             return controller.validateTrigger;
         };
-        ValidateBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
         return ValidateBindingBehavior;
     }(validate_binding_behavior_base_1.ValidateBindingBehaviorBase));
+    ValidateBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
     exports.ValidateBindingBehavior = ValidateBindingBehavior;
     /**
      * Binding behavior. Indicates the bound property will be validated
@@ -21178,14 +21390,14 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", 'au
     var ValidateManuallyBindingBehavior = (function (_super) {
         __extends(ValidateManuallyBindingBehavior, _super);
         function ValidateManuallyBindingBehavior() {
-            _super.apply(this, arguments);
+            return _super.apply(this, arguments) || this;
         }
         ValidateManuallyBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.manual;
         };
-        ValidateManuallyBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
         return ValidateManuallyBindingBehavior;
     }(validate_binding_behavior_base_1.ValidateBindingBehaviorBase));
+    ValidateManuallyBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
     exports.ValidateManuallyBindingBehavior = ValidateManuallyBindingBehavior;
     /**
      * Binding behavior. Indicates the bound property should be validated
@@ -21194,14 +21406,14 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", 'au
     var ValidateOnBlurBindingBehavior = (function (_super) {
         __extends(ValidateOnBlurBindingBehavior, _super);
         function ValidateOnBlurBindingBehavior() {
-            _super.apply(this, arguments);
+            return _super.apply(this, arguments) || this;
         }
         ValidateOnBlurBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.blur;
         };
-        ValidateOnBlurBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
         return ValidateOnBlurBindingBehavior;
     }(validate_binding_behavior_base_1.ValidateBindingBehaviorBase));
+    ValidateOnBlurBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
     exports.ValidateOnBlurBindingBehavior = ValidateOnBlurBindingBehavior;
     /**
      * Binding behavior. Indicates the bound property should be validated
@@ -21211,14 +21423,14 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", 'au
     var ValidateOnChangeBindingBehavior = (function (_super) {
         __extends(ValidateOnChangeBindingBehavior, _super);
         function ValidateOnChangeBindingBehavior() {
-            _super.apply(this, arguments);
+            return _super.apply(this, arguments) || this;
         }
         ValidateOnChangeBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.change;
         };
-        ValidateOnChangeBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
         return ValidateOnChangeBindingBehavior;
     }(validate_binding_behavior_base_1.ValidateBindingBehaviorBase));
+    ValidateOnChangeBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
     exports.ValidateOnChangeBindingBehavior = ValidateOnChangeBindingBehavior;
     /**
      * Binding behavior. Indicates the bound property should be validated
@@ -21228,18 +21440,18 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", 'au
     var ValidateOnChangeOrBlurBindingBehavior = (function (_super) {
         __extends(ValidateOnChangeOrBlurBindingBehavior, _super);
         function ValidateOnChangeOrBlurBindingBehavior() {
-            _super.apply(this, arguments);
+            return _super.apply(this, arguments) || this;
         }
         ValidateOnChangeOrBlurBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.changeOrBlur;
         };
-        ValidateOnChangeOrBlurBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
         return ValidateOnChangeOrBlurBindingBehavior;
     }(validate_binding_behavior_base_1.ValidateBindingBehaviorBase));
+    ValidateOnChangeOrBlurBindingBehavior.inject = [aurelia_task_queue_1.TaskQueue];
     exports.ValidateOnChangeOrBlurBindingBehavior = ValidateOnChangeOrBlurBindingBehavior;
 });
 
-define('aurelia-validation/validation-controller-factory',["require", "exports", './validation-controller', './validator'], function (require, exports, validation_controller_1, validator_1) {
+define('aurelia-validation/validation-controller-factory',["require", "exports", "./validation-controller", "./validator"], function (require, exports, validation_controller_1, validator_1) {
     "use strict";
     /**
      * Creates ValidationController instances.
@@ -21281,7 +21493,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-define('aurelia-validation/validation-errors-custom-attribute',["require", "exports", 'aurelia-binding', 'aurelia-dependency-injection', 'aurelia-templating', './validation-controller'], function (require, exports, aurelia_binding_1, aurelia_dependency_injection_1, aurelia_templating_1, validation_controller_1) {
+define('aurelia-validation/validation-errors-custom-attribute',["require", "exports", "aurelia-binding", "aurelia-dependency-injection", "aurelia-templating", "./validation-controller"], function (require, exports, aurelia_binding_1, aurelia_dependency_injection_1, aurelia_templating_1, validation_controller_1) {
     "use strict";
     var ValidationErrorsCustomAttribute = (function () {
         function ValidationErrorsCustomAttribute(boundaryElement, controllerAccessor) {
@@ -21304,22 +21516,25 @@ define('aurelia-validation/validation-errors-custom-attribute',["require", "expo
             return elements.filter(function (e) { return _this.boundaryElement.contains(e); });
         };
         ValidationErrorsCustomAttribute.prototype.render = function (instruction) {
-            var _loop_1 = function(error) {
-                var index = this_1.errors.findIndex(function (x) { return x.error === error; });
+            var _loop_1 = function (result) {
+                var index = this_1.errors.findIndex(function (x) { return x.error === result; });
                 if (index !== -1) {
                     this_1.errors.splice(index, 1);
                 }
             };
             var this_1 = this;
             for (var _i = 0, _a = instruction.unrender; _i < _a.length; _i++) {
-                var error = _a[_i].error;
-                _loop_1(error);
+                var result = _a[_i].result;
+                _loop_1(result);
             }
             for (var _b = 0, _c = instruction.render; _b < _c.length; _b++) {
-                var _d = _c[_b], error = _d.error, elements = _d.elements;
+                var _d = _c[_b], result = _d.result, elements = _d.elements;
+                if (result.valid) {
+                    continue;
+                }
                 var targets = this.interestingElements(elements);
                 if (targets.length) {
-                    this.errors.push({ error: error, targets: targets });
+                    this.errors.push({ error: result, targets: targets });
                 }
             }
             this.sort();
@@ -21332,16 +21547,16 @@ define('aurelia-validation/validation-errors-custom-attribute',["require", "expo
         ValidationErrorsCustomAttribute.prototype.unbind = function () {
             this.controllerAccessor().removeRenderer(this);
         };
-        ValidationErrorsCustomAttribute.inject = [Element, aurelia_dependency_injection_1.Lazy.of(validation_controller_1.ValidationController)];
-        ValidationErrorsCustomAttribute = __decorate([
-            aurelia_templating_1.customAttribute('validation-errors', aurelia_binding_1.bindingMode.twoWay)
-        ], ValidationErrorsCustomAttribute);
         return ValidationErrorsCustomAttribute;
     }());
+    ValidationErrorsCustomAttribute.inject = [Element, aurelia_dependency_injection_1.Lazy.of(validation_controller_1.ValidationController)];
+    ValidationErrorsCustomAttribute = __decorate([
+        aurelia_templating_1.customAttribute('validation-errors', aurelia_binding_1.bindingMode.twoWay)
+    ], ValidationErrorsCustomAttribute);
     exports.ValidationErrorsCustomAttribute = ValidationErrorsCustomAttribute;
 });
 
-define('aurelia-validation/validation-renderer-custom-attribute',["require", "exports", './validation-controller'], function (require, exports, validation_controller_1) {
+define('aurelia-validation/validation-renderer-custom-attribute',["require", "exports", "./validation-controller"], function (require, exports, validation_controller_1) {
     "use strict";
     var ValidationRendererCustomAttribute = (function () {
         function ValidationRendererCustomAttribute() {
@@ -21396,12 +21611,12 @@ define('aurelia-validation/implementation/rules',["require", "exports"], functio
         Rules.get = function (target) {
             return target[Rules.key] || null;
         };
-        /**
-         * The name of the property that stores the rules.
-         */
-        Rules.key = '__rules__';
         return Rules;
     }());
+    /**
+     * The name of the property that stores the rules.
+     */
+    Rules.key = '__rules__';
     exports.Rules = Rules;
 });
 
@@ -21418,7 +21633,7 @@ var __extends = (this && this.__extends) || function (d, b) {
     function __() { this.constructor = d; }
     d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 };
-define('aurelia-validation/implementation/validation-parser',["require", "exports", 'aurelia-binding', 'aurelia-templating', './util', 'aurelia-logging'], function (require, exports, aurelia_binding_1, aurelia_templating_1, util_1, LogManager) {
+define('aurelia-validation/implementation/validation-parser',["require", "exports", "aurelia-binding", "aurelia-templating", "./util", "aurelia-logging"], function (require, exports, aurelia_binding_1, aurelia_templating_1, util_1, LogManager) {
     "use strict";
     var ValidationParser = (function () {
         function ValidationParser(parser, bindinqLanguage) {
@@ -21472,15 +21687,16 @@ define('aurelia-validation/implementation/validation-parser',["require", "export
             }
             return this.parser.parse(match[1]);
         };
-        ValidationParser.inject = [aurelia_binding_1.Parser, aurelia_templating_1.BindingLanguage];
         return ValidationParser;
     }());
+    ValidationParser.inject = [aurelia_binding_1.Parser, aurelia_templating_1.BindingLanguage];
     exports.ValidationParser = ValidationParser;
     var MessageExpressionValidator = (function (_super) {
         __extends(MessageExpressionValidator, _super);
         function MessageExpressionValidator(originalMessage) {
-            _super.call(this, []);
-            this.originalMessage = originalMessage;
+            var _this = _super.call(this, []) || this;
+            _this.originalMessage = originalMessage;
+            return _this;
         }
         MessageExpressionValidator.validate = function (expression, originalMessage) {
             var visitor = new MessageExpressionValidator(originalMessage);
@@ -21500,7 +21716,7 @@ define('aurelia-validation/implementation/validation-parser',["require", "export
     exports.MessageExpressionValidator = MessageExpressionValidator;
 });
 
-define('aurelia-validation/implementation/validation-messages',["require", "exports", './validation-parser'], function (require, exports, validation_parser_1) {
+define('aurelia-validation/implementation/validation-messages',["require", "exports", "./validation-parser"], function (require, exports, validation_parser_1) {
     "use strict";
     /**
      * Dictionary of validation messages. [messageKey]: messageExpression
@@ -21541,20 +21757,23 @@ define('aurelia-validation/implementation/validation-messages',["require", "expo
             return this.parser.parseMessage(message);
         };
         /**
-         * When a display name is not provided, this method is used to formulate
-         * a display name using the property name.
+         * Formulates a property display name using the property name and the configured
+         * displayName (if provided).
          * Override this with your own custom logic.
          * @param propertyName The property name.
          */
-        ValidationMessageProvider.prototype.getDisplayName = function (propertyName) {
+        ValidationMessageProvider.prototype.getDisplayName = function (propertyName, displayName) {
+            if (displayName !== null && displayName !== undefined) {
+                return displayName;
+            }
             // split on upper-case letters.
             var words = propertyName.split(/(?=[A-Z])/).join(' ');
             // capitalize first letter.
             return words.charAt(0).toUpperCase() + words.slice(1);
         };
-        ValidationMessageProvider.inject = [validation_parser_1.ValidationParser];
         return ValidationMessageProvider;
     }());
+    ValidationMessageProvider.inject = [validation_parser_1.ValidationParser];
     exports.ValidationMessageProvider = ValidationMessageProvider;
 });
 
@@ -21563,7 +21782,7 @@ var __extends = (this && this.__extends) || function (d, b) {
     function __() { this.constructor = d; }
     d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 };
-define('aurelia-validation/implementation/standard-validator',["require", "exports", 'aurelia-templating', '../validator', '../validation-error', './rules', './validation-messages'], function (require, exports, aurelia_templating_1, validator_1, validation_error_1, rules_1, validation_messages_1) {
+define('aurelia-validation/implementation/standard-validator',["require", "exports", "aurelia-templating", "../validator", "../validate-result", "./rules", "./validation-messages"], function (require, exports, aurelia_templating_1, validator_1, validate_result_1, rules_1, validation_messages_1) {
     "use strict";
     /**
      * Validates.
@@ -21572,10 +21791,11 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
     var StandardValidator = (function (_super) {
         __extends(StandardValidator, _super);
         function StandardValidator(messageProvider, resources) {
-            _super.call(this);
-            this.messageProvider = messageProvider;
-            this.lookupFunctions = resources.lookupFunctions;
-            this.getDisplayName = messageProvider.getDisplayName.bind(messageProvider);
+            var _this = _super.call(this) || this;
+            _this.messageProvider = messageProvider;
+            _this.lookupFunctions = resources.lookupFunctions;
+            _this.getDisplayName = messageProvider.getDisplayName.bind(messageProvider);
+            return _this;
         }
         /**
          * Validates the specified property.
@@ -21613,8 +21833,8 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
         StandardValidator.prototype.getMessage = function (rule, object, value) {
             var expression = rule.message || this.messageProvider.getMessage(rule.messageKey);
             var _a = rule.property, propertyName = _a.name, displayName = _a.displayName;
-            if (displayName === null && propertyName !== null) {
-                displayName = this.messageProvider.getDisplayName(propertyName);
+            if (propertyName !== null) {
+                displayName = this.messageProvider.getDisplayName(propertyName, displayName);
             }
             var overrideContext = {
                 $displayName: displayName,
@@ -21626,15 +21846,15 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
             };
             return expression.evaluate({ bindingContext: object, overrideContext: overrideContext }, this.lookupFunctions);
         };
-        StandardValidator.prototype.validateRuleSequence = function (object, propertyName, ruleSequence, sequence) {
+        StandardValidator.prototype.validateRuleSequence = function (object, propertyName, ruleSequence, sequence, results) {
             var _this = this;
             // are we validating all properties or a single property?
             var validateAllProperties = propertyName === null || propertyName === undefined;
             var rules = ruleSequence[sequence];
-            var errors = [];
+            var allValid = true;
             // validate each rule.
             var promises = [];
-            var _loop_1 = function(i) {
+            var _loop_1 = function (i) {
                 var rule = rules[i];
                 // is the rule related to the property we're validating.
                 if (!validateAllProperties && rule.property.name !== propertyName) {
@@ -21650,11 +21870,11 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
                 if (!(promiseOrBoolean instanceof Promise)) {
                     promiseOrBoolean = Promise.resolve(promiseOrBoolean);
                 }
-                promises.push(promiseOrBoolean.then(function (isValid) {
-                    if (!isValid) {
-                        var message = _this.getMessage(rule, object, value);
-                        errors.push(new validation_error_1.ValidationError(rule, message, object, rule.property.name));
-                    }
+                promises.push(promiseOrBoolean.then(function (valid) {
+                    var message = valid ? null : _this.getMessage(rule, object, value);
+                    results.push(new validate_result_1.ValidateResult(rule, object, rule.property.name, valid, message));
+                    allValid = allValid && valid;
+                    return valid;
                 }));
             };
             for (var i = 0; i < rules.length; i++) {
@@ -21663,10 +21883,10 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
             return Promise.all(promises)
                 .then(function () {
                 sequence++;
-                if (errors.length === 0 && sequence < ruleSequence.length) {
-                    return _this.validateRuleSequence(object, propertyName, ruleSequence, sequence);
+                if (allValid && sequence < ruleSequence.length) {
+                    return _this.validateRuleSequence(object, propertyName, ruleSequence, sequence, results);
                 }
-                return errors;
+                return results;
             });
         };
         StandardValidator.prototype.validate = function (object, propertyName, rules) {
@@ -21679,15 +21899,15 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
             if (!rules) {
                 return Promise.resolve([]);
             }
-            return this.validateRuleSequence(object, propertyName, rules, 0);
+            return this.validateRuleSequence(object, propertyName, rules, 0, []);
         };
-        StandardValidator.inject = [validation_messages_1.ValidationMessageProvider, aurelia_templating_1.ViewResources];
         return StandardValidator;
     }(validator_1.Validator));
+    StandardValidator.inject = [validation_messages_1.ValidationMessageProvider, aurelia_templating_1.ViewResources];
     exports.StandardValidator = StandardValidator;
 });
 
-define('aurelia-validation/implementation/validation-rules',["require", "exports", './util', './rules', './validation-messages'], function (require, exports, util_1, rules_1, validation_messages_1) {
+define('aurelia-validation/implementation/validation-rules',["require", "exports", "./util", "./rules", "./validation-messages"], function (require, exports, util_1, rules_1, validation_messages_1) {
     "use strict";
     /**
      * Part of the fluent rule API. Enables customizing property rules.
@@ -21705,7 +21925,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
                 when: null,
                 messageKey: 'default',
                 message: null,
-                sequence: fluentEnsure._sequence
+                sequence: fluentRules.sequence
             };
             this.fluentEnsure._addRule(this.rule);
         }
@@ -21715,7 +21935,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
          * rules until less expensive rules pass validation.
          */
         FluentRuleCustomizer.prototype.then = function () {
-            this.fluentEnsure._sequence++;
+            this.fluentRules.sequence++;
             return this;
         };
         /**
@@ -21873,6 +22093,12 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
             this.fluentEnsure = fluentEnsure;
             this.parser = parser;
             this.property = property;
+            /**
+             * Current rule sequence number. Used to postpone evaluation of rules until rules
+             * with lower sequence number have successfully validated. The "then" fluent API method
+             * manages this property, there's usually no need to set it directly.
+             */
+            this.sequence = 0;
         }
         /**
          * Sets the display name of the ensured property.
@@ -21911,7 +22137,10 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
                 throw new Error("Rule with name \"" + name + "\" does not exist.");
             }
             var config = rule.argsToConfig ? rule.argsToConfig.apply(rule, args) : undefined;
-            return this.satisfies(function (value, obj) { return (_a = rule.condition).call.apply(_a, [_this, value, obj].concat(args)); var _a; }, config)
+            return this.satisfies(function (value, obj) {
+                return (_a = rule.condition).call.apply(_a, [_this, value, obj].concat(args));
+                var _a;
+            }, config)
                 .withMessageKey(name);
         };
         /**
@@ -21984,23 +22213,20 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
             return this.satisfies(function (value) { return value === null || value === undefined || value === '' || value === expectedValue; }, { expectedValue: expectedValue })
                 .withMessageKey('equals');
         };
-        FluentRules.customRules = {};
         return FluentRules;
     }());
+    FluentRules.customRules = {};
     exports.FluentRules = FluentRules;
     /**
      * Part of the fluent rule API. Enables targeting properties and objects with rules.
      */
     var FluentEnsure = (function () {
-        /* tslint:enable */
         function FluentEnsure(parser) {
             this.parser = parser;
             /**
              * Rules that have been defined using the fluent API.
              */
             this.rules = [];
-            /* tslint:disable */
-            this._sequence = 0;
         }
         /**
          * Target a property with validation rules.
@@ -22099,16 +22325,17 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
 });
 
 // Exports
-define('aurelia-validation/aurelia-validation',["require", "exports", './validate-binding-behavior', './validate-trigger', './validation-controller', './validation-controller-factory', './validation-error', './validation-errors-custom-attribute', './validation-renderer-custom-attribute', './validator', './implementation/rules', './implementation/standard-validator', './implementation/validation-messages', './implementation/validation-parser', './implementation/validation-rules', './validator', './implementation/standard-validator', './implementation/validation-parser', './implementation/validation-rules'], function (require, exports, validate_binding_behavior_1, validate_trigger_1, validation_controller_1, validation_controller_factory_1, validation_error_1, validation_errors_custom_attribute_1, validation_renderer_custom_attribute_1, validator_1, rules_1, standard_validator_1, validation_messages_1, validation_parser_1, validation_rules_1, validator_2, standard_validator_2, validation_parser_2, validation_rules_2) {
+define('aurelia-validation/aurelia-validation',["require", "exports", "./property-info", "./validate-binding-behavior", "./validate-result", "./validate-trigger", "./validation-controller", "./validation-controller-factory", "./validation-errors-custom-attribute", "./validation-renderer-custom-attribute", "./validator", "./implementation/rules", "./implementation/standard-validator", "./implementation/validation-messages", "./implementation/validation-parser", "./implementation/validation-rules", "./validator", "./implementation/standard-validator", "./implementation/validation-parser", "./implementation/validation-rules"], function (require, exports, property_info_1, validate_binding_behavior_1, validate_result_1, validate_trigger_1, validation_controller_1, validation_controller_factory_1, validation_errors_custom_attribute_1, validation_renderer_custom_attribute_1, validator_1, rules_1, standard_validator_1, validation_messages_1, validation_parser_1, validation_rules_1, validator_2, standard_validator_2, validation_parser_2, validation_rules_2) {
     "use strict";
     function __export(m) {
         for (var p in m) if (!exports.hasOwnProperty(p)) exports[p] = m[p];
     }
+    __export(property_info_1);
     __export(validate_binding_behavior_1);
+    __export(validate_result_1);
     __export(validate_trigger_1);
     __export(validation_controller_1);
     __export(validation_controller_factory_1);
-    __export(validation_error_1);
     __export(validation_errors_custom_attribute_1);
     __export(validation_renderer_custom_attribute_1);
     __export(validator_1);
