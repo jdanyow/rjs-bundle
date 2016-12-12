@@ -17700,11 +17700,15 @@ define('aurelia-templating-binding',['exports', 'aurelia-logging', 'aurelia-bind
     };
 
     SyntaxInterpreter.prototype.trigger = function trigger(resources, element, info) {
-      return new _aureliaBinding.ListenerExpression(this.eventManager, info.attrName, this.parser.parse(info.attrValue), false, true, resources.lookupFunctions);
+      return new _aureliaBinding.ListenerExpression(this.eventManager, info.attrName, this.parser.parse(info.attrValue), _aureliaBinding.delegationStrategy.none, true, resources.lookupFunctions);
+    };
+
+    SyntaxInterpreter.prototype.capture = function capture(resources, element, info) {
+      return new _aureliaBinding.ListenerExpression(this.eventManager, info.attrName, this.parser.parse(info.attrValue), _aureliaBinding.delegationStrategy.capturing, true, resources.lookupFunctions);
     };
 
     SyntaxInterpreter.prototype.delegate = function delegate(resources, element, info) {
-      return new _aureliaBinding.ListenerExpression(this.eventManager, info.attrName, this.parser.parse(info.attrValue), true, true, resources.lookupFunctions);
+      return new _aureliaBinding.ListenerExpression(this.eventManager, info.attrName, this.parser.parse(info.attrValue), _aureliaBinding.delegationStrategy.bubbling, true, resources.lookupFunctions);
     };
 
     SyntaxInterpreter.prototype.call = function call(resources, element, info, existingInstruction) {
@@ -19052,10 +19056,10 @@ define('aurelia-templating-resources/array-repeat-strategy',['exports', './repea
 
       if (repeat.__queuedSplices) {
         for (var i = 0, ii = splices.length; i < ii; ++i) {
-          var _splices$i = splices[i];
-          var index = _splices$i.index;
-          var removed = _splices$i.removed;
-          var addedCount = _splices$i.addedCount;
+          var _splices$i = splices[i],
+              index = _splices$i.index,
+              removed = _splices$i.removed,
+              addedCount = _splices$i.addedCount;
 
           (0, _aureliaBinding.mergeSplice)(repeat.__queuedSplices, index, removed, addedCount);
         }
@@ -20417,14 +20421,14 @@ define('aurelia-templating-resources/throttle-binding-behavior',['exports', 'aur
     }
 
     ThrottleBindingBehavior.prototype.bind = function bind(binding, source) {
-      var delay = arguments.length <= 2 || arguments[2] === undefined ? 200 : arguments[2];
+      var delay = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 200;
 
       var methodToThrottle = 'updateTarget';
       if (binding.callSource) {
         methodToThrottle = 'callSource';
       } else if (binding.updateSource && binding.mode === _aureliaBinding.bindingMode.twoWay) {
-          methodToThrottle = 'updateSource';
-        }
+        methodToThrottle = 'updateSource';
+      }
 
       binding.throttledMethod = binding[methodToThrottle];
       binding.throttledMethod.originalName = methodToThrottle;
@@ -20480,14 +20484,14 @@ define('aurelia-templating-resources/debounce-binding-behavior',['exports', 'aur
     }
 
     DebounceBindingBehavior.prototype.bind = function bind(binding, source) {
-      var delay = arguments.length <= 2 || arguments[2] === undefined ? 200 : arguments[2];
+      var delay = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 200;
 
       var methodToDebounce = 'updateTarget';
       if (binding.callSource) {
         methodToDebounce = 'callSource';
       } else if (binding.updateSource && binding.mode === _aureliaBinding.bindingMode.twoWay) {
-          methodToDebounce = 'updateSource';
-        }
+        methodToDebounce = 'updateSource';
+      }
 
       binding.debouncedMethod = binding[methodToDebounce];
       binding.debouncedMethod.originalName = methodToDebounce;
