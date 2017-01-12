@@ -1,3 +1,9 @@
+# initial setup
+
+```shell
+npm install
+```
+
 #updating
 
 Execute the following command to update all the aurelia libs:
