@@ -14,7 +14,7 @@ npm install aurelia-binding@latest aurelia-bootstrapper@latest aurelia-dependenc
 
 #smoke test
 
-To verify things are working, execute the following commands and navigate to http://localhost:9000.  You should see a form with some validation wired up.
+To verify things are working, execute the following commands and navigate to [http://localhost:9000](http://localhost:9000).  You should see a form with some validation wired up.
 
 ```shell
 gulp export
