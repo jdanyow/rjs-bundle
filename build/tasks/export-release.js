@@ -32,6 +32,7 @@ gulp.task('export', function(callback) {
 });
 
 gulp.task('export-gh-pages', ['export'], function(callback) {
-  return gulp.src('./export/**/*')
-    .pipe(ghPages());
+  return gulp.src('./export/**/*', {
+        dot: true
+    }).pipe(ghPages());
 });
