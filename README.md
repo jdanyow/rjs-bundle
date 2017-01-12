@@ -23,17 +23,12 @@ gulp serve-export
 
 #publish
 
-To publish, follow these steps...
+To publish, execute:
+
+```shell
+gulp export-gh-pages
+```
 
 >Note: publishing will effectively update **ALL** gists that reference this bundle. 
 
-1. Execute
-
-  ```shell
-  gulp export-gh-pages
-  ```
- 
-2. On the github site, navigate to the gh-pages branch and add an empty file named `.nojekyll`. 
-  *todo: figure out why the export task isn't including this file*
-  
-3. Here's a gist to check after publishing: https://gist.run/?id=7542e061bc940cde506b 
+Here's a gist to check after publishing: https://gist.run/?id=7542e061bc940cde506b
