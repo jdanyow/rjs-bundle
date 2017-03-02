@@ -6,6 +6,7 @@ define('aurelia-logging',['exports'], function (exports) {
   });
   exports.getLogger = getLogger;
   exports.addAppender = addAppender;
+  exports.removeAppender = removeAppender;
   exports.setLevel = setLevel;
   exports.getLevel = getLevel;
 
@@ -21,85 +22,52 @@ define('aurelia-logging',['exports'], function (exports) {
 
   var loggers = {};
   var appenders = [];
-  var slice = Array.prototype.slice;
-  var loggerConstructionKey = {};
   var globalDefaultLevel = logLevel.none;
 
-  function log(logger, level, args) {
-    var i = appenders.length;
-    var current = void 0;
-
-    args = slice.call(args);
-    args.unshift(logger);
-
-    while (i--) {
-      current = appenders[i];
-      current[level].apply(current, args);
-    }
+  function appendArgs() {
+    return [this].concat(Array.prototype.slice.call(arguments));
   }
 
-  function debug() {
-    if (this.level < 4) {
-      return;
-    }
+  function logFactory(level) {
+    var threshold = logLevel[level];
+    return function () {
+      if (this.level < threshold) {
+        return;
+      }
 
-    log(this, 'debug', arguments);
+      var args = appendArgs.apply(this, arguments);
+      var i = appenders.length;
+      while (i--) {
+        var _appenders$i;
+
+        (_appenders$i = appenders[i])[level].apply(_appenders$i, args);
+      }
+    };
   }
 
-  function info() {
-    if (this.level < 3) {
-      return;
-    }
-
-    log(this, 'info', arguments);
-  }
-
-  function warn() {
-    if (this.level < 2) {
-      return;
-    }
-
-    log(this, 'warn', arguments);
-  }
-
-  function error() {
-    if (this.level < 1) {
-      return;
-    }
-
-    log(this, 'error', arguments);
-  }
-
-  function connectLogger(logger) {
-    logger.debug = debug;
-    logger.info = info;
-    logger.warn = warn;
-    logger.error = error;
-  }
-
-  function createLogger(id) {
-    var logger = new Logger(id, loggerConstructionKey);
-    logger.setLevel(globalDefaultLevel);
-
-    if (appenders.length) {
-      connectLogger(logger);
-    }
-
-    return logger;
+  function connectLoggers() {
+    Object.assign(Logger.prototype, {
+      debug: logFactory('debug'),
+      info: logFactory('info'),
+      warn: logFactory('warn'),
+      error: logFactory('error')
+    });
   }
 
   function getLogger(id) {
-    return loggers[id] || (loggers[id] = createLogger(id));
+    return loggers[id] || new Logger(id);
   }
 
   function addAppender(appender) {
-    appenders.push(appender);
-
-    if (appenders.length === 1) {
-      for (var key in loggers) {
-        connectLogger(loggers[key]);
-      }
+    if (appenders.push(appender) === 1) {
+      connectLoggers();
     }
+  }
+
+  function removeAppender(appender) {
+    appenders = appenders.filter(function (a) {
+      return a !== appender;
+    });
   }
 
   function setLevel(level) {
@@ -114,16 +82,17 @@ define('aurelia-logging',['exports'], function (exports) {
   }
 
   var Logger = exports.Logger = function () {
-    function Logger(id, key) {
+    function Logger(id) {
       
 
-      this.level = logLevel.none;
-
-      if (key !== loggerConstructionKey) {
-        throw new Error('Cannot instantiate "Logger". Use "getLogger" instead.');
+      var cached = loggers[id];
+      if (cached) {
+        return cached;
       }
 
+      loggers[id] = this;
       this.id = id;
+      this.level = globalDefaultLevel;
     }
 
     Logger.prototype.debug = function debug(message) {};
@@ -253,7 +222,15 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
 
   
 
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj;
+  };
+
   var hasSetImmediate = typeof setImmediate === 'function';
+  var stackSeparator = '\nEnqueued in TaskQueue by:\n';
+  var microStackSeparator = '\nEnqueued in MicroTaskQueue by:\n';
 
   function makeRequestFlushFromMutationObserver(flush) {
     var toggle = 1;
@@ -279,7 +256,11 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
     };
   }
 
-  function onError(error, task) {
+  function onError(error, task, longStacks) {
+    if (longStacks && task.stack && (typeof error === 'undefined' ? 'undefined' : _typeof(error)) === 'object' && error !== null) {
+      error.stack = filterFlushStack(error.stack) + task.stack;
+    }
+
     if ('onError' in task) {
       task.onError(error);
     } else if (hasSetImmediate) {
@@ -300,6 +281,7 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
       
 
       this.flushing = false;
+      this.longStacks = false;
 
       this.microTaskQueue = [];
       this.microTaskQueueCapacity = 1024;
@@ -325,6 +307,9 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
         this.requestFlushMicroTaskQueue();
       }
 
+      if (this.longStacks) {
+        task.stack = this.prepareQueueStack(microStackSeparator);
+      }
       this.microTaskQueue.push(task);
     };
 
@@ -333,6 +318,9 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
         this.requestFlushTaskQueue();
       }
 
+      if (this.longStacks) {
+        task.stack = this.prepareQueueStack(stackSeparator);
+      }
       this.taskQueue.push(task);
     };
 
@@ -347,11 +335,14 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
         this.flushing = true;
         while (index < queue.length) {
           task = queue[index];
+          if (this.longStacks) {
+            this.stack = typeof task.stack === 'string' ? task.stack : undefined;
+          }
           task.call();
           index++;
         }
       } catch (error) {
-        onError(error, task);
+        onError(error, task, this.longStacks);
       } finally {
         this.flushing = false;
       }
@@ -367,6 +358,9 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
         this.flushing = true;
         while (index < queue.length) {
           task = queue[index];
+          if (this.longStacks) {
+            this.stack = typeof task.stack === 'string' ? task.stack : undefined;
+          }
           task.call();
           index++;
 
@@ -380,7 +374,7 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
           }
         }
       } catch (error) {
-        onError(error, task);
+        onError(error, task, this.longStacks);
       } finally {
         this.flushing = false;
       }
@@ -388,8 +382,46 @@ define('aurelia-task-queue',['exports', 'aurelia-pal'], function (exports, _aure
       queue.length = 0;
     };
 
+    TaskQueue.prototype.prepareQueueStack = function prepareQueueStack(separator) {
+      var stack = separator + filterQueueStack(captureStack());
+      if (typeof this.stack === 'string') {
+        stack = filterFlushStack(stack) + this.stack;
+      }
+      return stack;
+    };
+
     return TaskQueue;
   }();
+
+  function captureStack() {
+    var error = new Error();
+
+    if (error.stack) {
+      return error.stack;
+    }
+
+    try {
+      throw error;
+    } catch (e) {
+      return e.stack;
+    }
+  }
+
+  function filterQueueStack(stack) {
+    return stack.replace(/^[\s\S]*?\bqueue(Micro)?Task\b[^\n]*\n/, '');
+  }
+
+  function filterFlushStack(stack) {
+    var index = stack.lastIndexOf('flushMicroTaskQueue');
+    if (index < 0) {
+      index = stack.lastIndexOf('flushTaskQueue');
+      if (index < 0) {
+        return stack;
+      }
+    }
+    index = stack.lastIndexOf('\n', index);
+    return index < 0 ? stack : stack.substr(0, index);
+  }
 });
 define('aurelia-metadata',['exports', 'aurelia-pal'], function (exports, _aureliaPal) {
   'use strict';
@@ -771,7 +803,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
   
 
-  var _dec, _dec2, _class, _dec3, _class2, _dec4, _class3, _dec5, _class5, _dec6, _class7, _dec7, _class8, _dec8, _class9, _dec9, _class10, _class11, _temp, _dec10, _class12, _class13, _temp2;
+  var _dec, _dec2, _class, _dec3, _class2, _dec4, _class3, _dec5, _class5, _dec6, _class7, _dec7, _class8, _dec8, _class9, _dec9, _class10, _class12, _temp, _dec10, _class13, _class14, _temp2;
 
   var map = Object.create(null);
 
@@ -1857,7 +1889,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     Expression.prototype.toString = function toString() {
-      return Unparser.unparse(this);
+      return typeof FEATURE_NO_UNPARSER === 'undefined' ? _Unparser.unparse(this) : Function.prototype.toString.call(this);
     };
 
     return Expression;
@@ -2023,6 +2055,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       _this6.target = target;
       _this6.value = value;
+      _this6.isAssignable = true;
       return _this6;
     }
 
@@ -2035,6 +2068,11 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     Assign.prototype.connect = function connect(binding, scope) {};
+
+    Assign.prototype.assign = function assign(scope, value) {
+      this.value.assign(scope, value);
+      this.target.assign(scope, value);
+    };
 
     return Assign;
   }(Expression);
@@ -2676,199 +2714,204 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     return value;
   }
 
-  var Unparser = exports.Unparser = function () {
-    function Unparser(buffer) {
-      
+  var _Unparser = null;
 
-      this.buffer = buffer;
-    }
+  exports.Unparser = _Unparser;
+  if (typeof FEATURE_NO_UNPARSER === 'undefined') {
+    exports.Unparser = _Unparser = function () {
+      function Unparser(buffer) {
+        
 
-    Unparser.unparse = function unparse(expression) {
-      var buffer = [];
-      var visitor = new Unparser(buffer);
-
-      expression.accept(visitor);
-
-      return buffer.join('');
-    };
-
-    Unparser.prototype.write = function write(text) {
-      this.buffer.push(text);
-    };
-
-    Unparser.prototype.writeArgs = function writeArgs(args) {
-      this.write('(');
-
-      for (var _i15 = 0, length = args.length; _i15 < length; ++_i15) {
-        if (_i15 !== 0) {
-          this.write(',');
-        }
-
-        args[_i15].accept(this);
+        this.buffer = buffer;
       }
 
-      this.write(')');
-    };
+      Unparser.unparse = function unparse(expression) {
+        var buffer = [];
+        var visitor = new _Unparser(buffer);
 
-    Unparser.prototype.visitChain = function visitChain(chain) {
-      var expressions = chain.expressions;
+        expression.accept(visitor);
 
-      for (var _i16 = 0, length = expression.length; _i16 < length; ++_i16) {
-        if (_i16 !== 0) {
-          this.write(';');
+        return buffer.join('');
+      };
+
+      Unparser.prototype.write = function write(text) {
+        this.buffer.push(text);
+      };
+
+      Unparser.prototype.writeArgs = function writeArgs(args) {
+        this.write('(');
+
+        for (var _i15 = 0, length = args.length; _i15 < length; ++_i15) {
+          if (_i15 !== 0) {
+            this.write(',');
+          }
+
+          args[_i15].accept(this);
         }
 
-        expressions[_i16].accept(this);
-      }
-    };
+        this.write(')');
+      };
 
-    Unparser.prototype.visitBindingBehavior = function visitBindingBehavior(behavior) {
-      var args = behavior.args;
+      Unparser.prototype.visitChain = function visitChain(chain) {
+        var expressions = chain.expressions;
 
-      behavior.expression.accept(this);
-      this.write('&' + behavior.name);
+        for (var _i16 = 0, length = expression.length; _i16 < length; ++_i16) {
+          if (_i16 !== 0) {
+            this.write(';');
+          }
 
-      for (var _i17 = 0, length = args.length; _i17 < length; ++_i17) {
+          expressions[_i16].accept(this);
+        }
+      };
+
+      Unparser.prototype.visitBindingBehavior = function visitBindingBehavior(behavior) {
+        var args = behavior.args;
+
+        behavior.expression.accept(this);
+        this.write('&' + behavior.name);
+
+        for (var _i17 = 0, length = args.length; _i17 < length; ++_i17) {
+          this.write(':');
+          args[_i17].accept(this);
+        }
+      };
+
+      Unparser.prototype.visitValueConverter = function visitValueConverter(converter) {
+        var args = converter.args;
+
+        converter.expression.accept(this);
+        this.write('|' + converter.name);
+
+        for (var _i18 = 0, length = args.length; _i18 < length; ++_i18) {
+          this.write(':');
+          args[_i18].accept(this);
+        }
+      };
+
+      Unparser.prototype.visitAssign = function visitAssign(assign) {
+        assign.target.accept(this);
+        this.write('=');
+        assign.value.accept(this);
+      };
+
+      Unparser.prototype.visitConditional = function visitConditional(conditional) {
+        conditional.condition.accept(this);
+        this.write('?');
+        conditional.yes.accept(this);
         this.write(':');
-        args[_i17].accept(this);
-      }
-    };
+        conditional.no.accept(this);
+      };
 
-    Unparser.prototype.visitValueConverter = function visitValueConverter(converter) {
-      var args = converter.args;
+      Unparser.prototype.visitAccessThis = function visitAccessThis(access) {
+        if (access.ancestor === 0) {
+          this.write('$this');
+          return;
+        }
+        this.write('$parent');
+        var i = access.ancestor - 1;
+        while (i--) {
+          this.write('.$parent');
+        }
+      };
 
-      converter.expression.accept(this);
-      this.write('|' + converter.name);
+      Unparser.prototype.visitAccessScope = function visitAccessScope(access) {
+        var i = access.ancestor;
+        while (i--) {
+          this.write('$parent.');
+        }
+        this.write(access.name);
+      };
 
-      for (var _i18 = 0, length = args.length; _i18 < length; ++_i18) {
-        this.write(':');
-        args[_i18].accept(this);
-      }
-    };
+      Unparser.prototype.visitAccessMember = function visitAccessMember(access) {
+        access.object.accept(this);
+        this.write('.' + access.name);
+      };
 
-    Unparser.prototype.visitAssign = function visitAssign(assign) {
-      assign.target.accept(this);
-      this.write('=');
-      assign.value.accept(this);
-    };
+      Unparser.prototype.visitAccessKeyed = function visitAccessKeyed(access) {
+        access.object.accept(this);
+        this.write('[');
+        access.key.accept(this);
+        this.write(']');
+      };
 
-    Unparser.prototype.visitConditional = function visitConditional(conditional) {
-      conditional.condition.accept(this);
-      this.write('?');
-      conditional.yes.accept(this);
-      this.write(':');
-      conditional.no.accept(this);
-    };
+      Unparser.prototype.visitCallScope = function visitCallScope(call) {
+        var i = call.ancestor;
+        while (i--) {
+          this.write('$parent.');
+        }
+        this.write(call.name);
+        this.writeArgs(call.args);
+      };
 
-    Unparser.prototype.visitAccessThis = function visitAccessThis(access) {
-      if (access.ancestor === 0) {
-        this.write('$this');
-        return;
-      }
-      this.write('$parent');
-      var i = access.ancestor - 1;
-      while (i--) {
-        this.write('.$parent');
-      }
-    };
+      Unparser.prototype.visitCallFunction = function visitCallFunction(call) {
+        call.func.accept(this);
+        this.writeArgs(call.args);
+      };
 
-    Unparser.prototype.visitAccessScope = function visitAccessScope(access) {
-      var i = access.ancestor;
-      while (i--) {
-        this.write('$parent.');
-      }
-      this.write(access.name);
-    };
+      Unparser.prototype.visitCallMember = function visitCallMember(call) {
+        call.object.accept(this);
+        this.write('.' + call.name);
+        this.writeArgs(call.args);
+      };
 
-    Unparser.prototype.visitAccessMember = function visitAccessMember(access) {
-      access.object.accept(this);
-      this.write('.' + access.name);
-    };
+      Unparser.prototype.visitPrefix = function visitPrefix(prefix) {
+        this.write('(' + prefix.operation);
+        prefix.expression.accept(this);
+        this.write(')');
+      };
 
-    Unparser.prototype.visitAccessKeyed = function visitAccessKeyed(access) {
-      access.object.accept(this);
-      this.write('[');
-      access.key.accept(this);
-      this.write(']');
-    };
+      Unparser.prototype.visitBinary = function visitBinary(binary) {
+        binary.left.accept(this);
+        this.write(binary.operation);
+        binary.right.accept(this);
+      };
 
-    Unparser.prototype.visitCallScope = function visitCallScope(call) {
-      var i = call.ancestor;
-      while (i--) {
-        this.write('$parent.');
-      }
-      this.write(call.name);
-      this.writeArgs(call.args);
-    };
+      Unparser.prototype.visitLiteralPrimitive = function visitLiteralPrimitive(literal) {
+        this.write('' + literal.value);
+      };
 
-    Unparser.prototype.visitCallFunction = function visitCallFunction(call) {
-      call.func.accept(this);
-      this.writeArgs(call.args);
-    };
+      Unparser.prototype.visitLiteralArray = function visitLiteralArray(literal) {
+        var elements = literal.elements;
 
-    Unparser.prototype.visitCallMember = function visitCallMember(call) {
-      call.object.accept(this);
-      this.write('.' + call.name);
-      this.writeArgs(call.args);
-    };
+        this.write('[');
 
-    Unparser.prototype.visitPrefix = function visitPrefix(prefix) {
-      this.write('(' + prefix.operation);
-      prefix.expression.accept(this);
-      this.write(')');
-    };
+        for (var _i19 = 0, length = elements.length; _i19 < length; ++_i19) {
+          if (_i19 !== 0) {
+            this.write(',');
+          }
 
-    Unparser.prototype.visitBinary = function visitBinary(binary) {
-      binary.left.accept(this);
-      this.write(binary.operation);
-      binary.right.accept(this);
-    };
-
-    Unparser.prototype.visitLiteralPrimitive = function visitLiteralPrimitive(literal) {
-      this.write('' + literal.value);
-    };
-
-    Unparser.prototype.visitLiteralArray = function visitLiteralArray(literal) {
-      var elements = literal.elements;
-
-      this.write('[');
-
-      for (var _i19 = 0, length = elements.length; _i19 < length; ++_i19) {
-        if (_i19 !== 0) {
-          this.write(',');
+          elements[_i19].accept(this);
         }
 
-        elements[_i19].accept(this);
-      }
+        this.write(']');
+      };
 
-      this.write(']');
-    };
+      Unparser.prototype.visitLiteralObject = function visitLiteralObject(literal) {
+        var keys = literal.keys;
+        var values = literal.values;
 
-    Unparser.prototype.visitLiteralObject = function visitLiteralObject(literal) {
-      var keys = literal.keys;
-      var values = literal.values;
+        this.write('{');
 
-      this.write('{');
+        for (var _i20 = 0, length = keys.length; _i20 < length; ++_i20) {
+          if (_i20 !== 0) {
+            this.write(',');
+          }
 
-      for (var _i20 = 0, length = keys.length; _i20 < length; ++_i20) {
-        if (_i20 !== 0) {
-          this.write(',');
+          this.write('\'' + keys[_i20] + '\':');
+          values[_i20].accept(this);
         }
 
-        this.write('\'' + keys[_i20] + '\':');
-        values[_i20].accept(this);
-      }
+        this.write('}');
+      };
 
-      this.write('}');
-    };
+      Unparser.prototype.visitLiteralString = function visitLiteralString(literal) {
+        var escaped = literal.value.replace(/'/g, "\'");
+        this.write('\'' + escaped + '\'');
+      };
 
-    Unparser.prototype.visitLiteralString = function visitLiteralString(literal) {
-      var escaped = literal.value.replace(/'/g, "\'");
-      this.write('\'' + escaped + '\'');
-    };
-
-    return Unparser;
-  }();
+      return Unparser;
+    }();
+  }
 
   var ExpressionCloner = exports.ExpressionCloner = function () {
     function ExpressionCloner() {
@@ -4598,7 +4641,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     CheckedObserver.prototype.setValue = function setValue(newValue) {
-      if (this.value === newValue) {
+      if (this.initialSync && this.value === newValue) {
         return;
       }
 
@@ -4687,6 +4730,10 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       var oldValue = this.oldValue;
       var newValue = this.value;
 
+      if (newValue === oldValue) {
+        return;
+      }
+
       this.callSubscribers(newValue, oldValue);
     };
 
@@ -4768,12 +4815,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
     SelectValueObserver.prototype.synchronizeOptions = function synchronizeOptions() {
       var value = this.value;
-      var clear = void 0;
       var isArray = void 0;
 
-      if (value === null || value === undefined) {
-        clear = true;
-      } else if (Array.isArray(value)) {
+      if (Array.isArray(value)) {
         isArray = true;
       }
 
@@ -4785,10 +4829,6 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       var _loop = function _loop() {
         var option = options.item(i);
-        if (clear) {
-          option.selected = false;
-          return 'continue';
-        }
         var optionValue = option.hasOwnProperty('model') ? option.model : option.value;
         if (isArray) {
           option.selected = value.findIndex(function (item) {
@@ -5054,234 +5094,260 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     return new ExpressionObserver(scope, dependencies, observerLocator);
   }
 
-  var elements = exports.elements = {
-    a: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'target', 'transform', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    altGlyph: ['class', 'dx', 'dy', 'externalResourcesRequired', 'format', 'glyphRef', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    altGlyphDef: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-    altGlyphItem: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-    animate: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    animateColor: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    animateMotion: ['accumulate', 'additive', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keyPoints', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'origin', 'path', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'rotate', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    animateTransform: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'type', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    circle: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'r', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    clipPath: ['class', 'clipPathUnits', 'externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    'color-profile': ['id', 'local', 'name', 'rendering-intent', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    cursor: ['externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    defs: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    desc: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
-    ellipse: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    feBlend: ['class', 'height', 'id', 'in', 'in2', 'mode', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feColorMatrix: ['class', 'height', 'id', 'in', 'result', 'style', 'type', 'values', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feComponentTransfer: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feComposite: ['class', 'height', 'id', 'in', 'in2', 'k1', 'k2', 'k3', 'k4', 'operator', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feConvolveMatrix: ['bias', 'class', 'divisor', 'edgeMode', 'height', 'id', 'in', 'kernelMatrix', 'kernelUnitLength', 'order', 'preserveAlpha', 'result', 'style', 'targetX', 'targetY', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feDiffuseLighting: ['class', 'diffuseConstant', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feDisplacementMap: ['class', 'height', 'id', 'in', 'in2', 'result', 'scale', 'style', 'width', 'x', 'xChannelSelector', 'xml:base', 'xml:lang', 'xml:space', 'y', 'yChannelSelector'],
-    feDistantLight: ['azimuth', 'elevation', 'id', 'xml:base', 'xml:lang', 'xml:space'],
-    feFlood: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feFuncA: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-    feFuncB: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-    feFuncG: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-    feFuncR: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-    feGaussianBlur: ['class', 'height', 'id', 'in', 'result', 'stdDeviation', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feImage: ['class', 'externalResourcesRequired', 'height', 'id', 'preserveAspectRatio', 'result', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feMerge: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feMergeNode: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-    feMorphology: ['class', 'height', 'id', 'in', 'operator', 'radius', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feOffset: ['class', 'dx', 'dy', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    fePointLight: ['id', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
-    feSpecularLighting: ['class', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'specularConstant', 'specularExponent', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feSpotLight: ['id', 'limitingConeAngle', 'pointsAtX', 'pointsAtY', 'pointsAtZ', 'specularExponent', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
-    feTile: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    feTurbulence: ['baseFrequency', 'class', 'height', 'id', 'numOctaves', 'result', 'seed', 'stitchTiles', 'style', 'type', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    filter: ['class', 'externalResourcesRequired', 'filterRes', 'filterUnits', 'height', 'id', 'primitiveUnits', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    font: ['class', 'externalResourcesRequired', 'horiz-adv-x', 'horiz-origin-x', 'horiz-origin-y', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
-    'font-face': ['accent-height', 'alphabetic', 'ascent', 'bbox', 'cap-height', 'descent', 'font-family', 'font-size', 'font-stretch', 'font-style', 'font-variant', 'font-weight', 'hanging', 'id', 'ideographic', 'mathematical', 'overline-position', 'overline-thickness', 'panose-1', 'slope', 'stemh', 'stemv', 'strikethrough-position', 'strikethrough-thickness', 'underline-position', 'underline-thickness', 'unicode-range', 'units-per-em', 'v-alphabetic', 'v-hanging', 'v-ideographic', 'v-mathematical', 'widths', 'x-height', 'xml:base', 'xml:lang', 'xml:space'],
-    'font-face-format': ['id', 'string', 'xml:base', 'xml:lang', 'xml:space'],
-    'font-face-name': ['id', 'name', 'xml:base', 'xml:lang', 'xml:space'],
-    'font-face-src': ['id', 'xml:base', 'xml:lang', 'xml:space'],
-    'font-face-uri': ['id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    foreignObject: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    g: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    glyph: ['arabic-form', 'class', 'd', 'glyph-name', 'horiz-adv-x', 'id', 'lang', 'orientation', 'style', 'unicode', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
-    glyphRef: ['class', 'dx', 'dy', 'format', 'glyphRef', 'id', 'style', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    hkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space'],
-    image: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    line: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'x1', 'x2', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
-    linearGradient: ['class', 'externalResourcesRequired', 'gradientTransform', 'gradientUnits', 'id', 'spreadMethod', 'style', 'x1', 'x2', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
-    marker: ['class', 'externalResourcesRequired', 'id', 'markerHeight', 'markerUnits', 'markerWidth', 'orient', 'preserveAspectRatio', 'refX', 'refY', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
-    mask: ['class', 'externalResourcesRequired', 'height', 'id', 'maskContentUnits', 'maskUnits', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    metadata: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-    'missing-glyph': ['class', 'd', 'horiz-adv-x', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
-    mpath: ['externalResourcesRequired', 'id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    path: ['class', 'd', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'pathLength', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    pattern: ['class', 'externalResourcesRequired', 'height', 'id', 'patternContentUnits', 'patternTransform', 'patternUnits', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'viewBox', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    polygon: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    polyline: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    radialGradient: ['class', 'cx', 'cy', 'externalResourcesRequired', 'fx', 'fy', 'gradientTransform', 'gradientUnits', 'id', 'r', 'spreadMethod', 'style', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    rect: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    script: ['externalResourcesRequired', 'id', 'type', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    set: ['attributeName', 'attributeType', 'begin', 'dur', 'end', 'externalResourcesRequired', 'fill', 'id', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    stop: ['class', 'id', 'offset', 'style', 'xml:base', 'xml:lang', 'xml:space'],
-    style: ['id', 'media', 'title', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-    svg: ['baseProfile', 'class', 'contentScriptType', 'contentStyleType', 'externalResourcesRequired', 'height', 'id', 'onabort', 'onactivate', 'onclick', 'onerror', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onresize', 'onscroll', 'onunload', 'onzoom', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'version', 'viewBox', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'zoomAndPan'],
-    switch: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-    symbol: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
-    text: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'transform', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    textPath: ['class', 'externalResourcesRequired', 'id', 'lengthAdjust', 'method', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'spacing', 'startOffset', 'style', 'systemLanguage', 'textLength', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-    title: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
-    tref: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    tspan: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    use: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-    view: ['externalResourcesRequired', 'id', 'preserveAspectRatio', 'viewBox', 'viewTarget', 'xml:base', 'xml:lang', 'xml:space', 'zoomAndPan'],
-    vkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space']
-  };
-  var presentationElements = exports.presentationElements = {
-    'a': true,
-    'altGlyph': true,
-    'animate': true,
-    'animateColor': true,
-    'circle': true,
-    'clipPath': true,
-    'defs': true,
-    'ellipse': true,
-    'feBlend': true,
-    'feColorMatrix': true,
-    'feComponentTransfer': true,
-    'feComposite': true,
-    'feConvolveMatrix': true,
-    'feDiffuseLighting': true,
-    'feDisplacementMap': true,
-    'feFlood': true,
-    'feGaussianBlur': true,
-    'feImage': true,
-    'feMerge': true,
-    'feMorphology': true,
-    'feOffset': true,
-    'feSpecularLighting': true,
-    'feTile': true,
-    'feTurbulence': true,
-    'filter': true,
-    'font': true,
-    'foreignObject': true,
-    'g': true,
-    'glyph': true,
-    'glyphRef': true,
-    'image': true,
-    'line': true,
-    'linearGradient': true,
-    'marker': true,
-    'mask': true,
-    'missing-glyph': true,
-    'path': true,
-    'pattern': true,
-    'polygon': true,
-    'polyline': true,
-    'radialGradient': true,
-    'rect': true,
-    'stop': true,
-    'svg': true,
-    'switch': true,
-    'symbol': true,
-    'text': true,
-    'textPath': true,
-    'tref': true,
-    'tspan': true,
-    'use': true
-  };
+  var svgElements = void 0;
+  var svgPresentationElements = void 0;
+  var svgPresentationAttributes = void 0;
+  var svgAnalyzer = void 0;
 
-  var presentationAttributes = exports.presentationAttributes = {
-    'alignment-baseline': true,
-    'baseline-shift': true,
-    'clip-path': true,
-    'clip-rule': true,
-    'clip': true,
-    'color-interpolation-filters': true,
-    'color-interpolation': true,
-    'color-profile': true,
-    'color-rendering': true,
-    'color': true,
-    'cursor': true,
-    'direction': true,
-    'display': true,
-    'dominant-baseline': true,
-    'enable-background': true,
-    'fill-opacity': true,
-    'fill-rule': true,
-    'fill': true,
-    'filter': true,
-    'flood-color': true,
-    'flood-opacity': true,
-    'font-family': true,
-    'font-size-adjust': true,
-    'font-size': true,
-    'font-stretch': true,
-    'font-style': true,
-    'font-variant': true,
-    'font-weight': true,
-    'glyph-orientation-horizontal': true,
-    'glyph-orientation-vertical': true,
-    'image-rendering': true,
-    'kerning': true,
-    'letter-spacing': true,
-    'lighting-color': true,
-    'marker-end': true,
-    'marker-mid': true,
-    'marker-start': true,
-    'mask': true,
-    'opacity': true,
-    'overflow': true,
-    'pointer-events': true,
-    'shape-rendering': true,
-    'stop-color': true,
-    'stop-opacity': true,
-    'stroke-dasharray': true,
-    'stroke-dashoffset': true,
-    'stroke-linecap': true,
-    'stroke-linejoin': true,
-    'stroke-miterlimit': true,
-    'stroke-opacity': true,
-    'stroke-width': true,
-    'stroke': true,
-    'text-anchor': true,
-    'text-decoration': true,
-    'text-rendering': true,
-    'unicode-bidi': true,
-    'visibility': true,
-    'word-spacing': true,
-    'writing-mode': true
-  };
+  if (typeof FEATURE_NO_SVG === 'undefined') {
+    (function () {
+      svgElements = {
+        a: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'target', 'transform', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        altGlyph: ['class', 'dx', 'dy', 'externalResourcesRequired', 'format', 'glyphRef', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        altGlyphDef: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+        altGlyphItem: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+        animate: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        animateColor: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        animateMotion: ['accumulate', 'additive', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keyPoints', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'origin', 'path', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'rotate', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        animateTransform: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'type', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        circle: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'r', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        clipPath: ['class', 'clipPathUnits', 'externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        'color-profile': ['id', 'local', 'name', 'rendering-intent', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        cursor: ['externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        defs: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        desc: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
+        ellipse: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        feBlend: ['class', 'height', 'id', 'in', 'in2', 'mode', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feColorMatrix: ['class', 'height', 'id', 'in', 'result', 'style', 'type', 'values', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feComponentTransfer: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feComposite: ['class', 'height', 'id', 'in', 'in2', 'k1', 'k2', 'k3', 'k4', 'operator', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feConvolveMatrix: ['bias', 'class', 'divisor', 'edgeMode', 'height', 'id', 'in', 'kernelMatrix', 'kernelUnitLength', 'order', 'preserveAlpha', 'result', 'style', 'targetX', 'targetY', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feDiffuseLighting: ['class', 'diffuseConstant', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feDisplacementMap: ['class', 'height', 'id', 'in', 'in2', 'result', 'scale', 'style', 'width', 'x', 'xChannelSelector', 'xml:base', 'xml:lang', 'xml:space', 'y', 'yChannelSelector'],
+        feDistantLight: ['azimuth', 'elevation', 'id', 'xml:base', 'xml:lang', 'xml:space'],
+        feFlood: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feFuncA: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+        feFuncB: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+        feFuncG: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+        feFuncR: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+        feGaussianBlur: ['class', 'height', 'id', 'in', 'result', 'stdDeviation', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feImage: ['class', 'externalResourcesRequired', 'height', 'id', 'preserveAspectRatio', 'result', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feMerge: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feMergeNode: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+        feMorphology: ['class', 'height', 'id', 'in', 'operator', 'radius', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feOffset: ['class', 'dx', 'dy', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        fePointLight: ['id', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
+        feSpecularLighting: ['class', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'specularConstant', 'specularExponent', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feSpotLight: ['id', 'limitingConeAngle', 'pointsAtX', 'pointsAtY', 'pointsAtZ', 'specularExponent', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
+        feTile: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        feTurbulence: ['baseFrequency', 'class', 'height', 'id', 'numOctaves', 'result', 'seed', 'stitchTiles', 'style', 'type', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        filter: ['class', 'externalResourcesRequired', 'filterRes', 'filterUnits', 'height', 'id', 'primitiveUnits', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        font: ['class', 'externalResourcesRequired', 'horiz-adv-x', 'horiz-origin-x', 'horiz-origin-y', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
+        'font-face': ['accent-height', 'alphabetic', 'ascent', 'bbox', 'cap-height', 'descent', 'font-family', 'font-size', 'font-stretch', 'font-style', 'font-variant', 'font-weight', 'hanging', 'id', 'ideographic', 'mathematical', 'overline-position', 'overline-thickness', 'panose-1', 'slope', 'stemh', 'stemv', 'strikethrough-position', 'strikethrough-thickness', 'underline-position', 'underline-thickness', 'unicode-range', 'units-per-em', 'v-alphabetic', 'v-hanging', 'v-ideographic', 'v-mathematical', 'widths', 'x-height', 'xml:base', 'xml:lang', 'xml:space'],
+        'font-face-format': ['id', 'string', 'xml:base', 'xml:lang', 'xml:space'],
+        'font-face-name': ['id', 'name', 'xml:base', 'xml:lang', 'xml:space'],
+        'font-face-src': ['id', 'xml:base', 'xml:lang', 'xml:space'],
+        'font-face-uri': ['id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        foreignObject: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        g: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        glyph: ['arabic-form', 'class', 'd', 'glyph-name', 'horiz-adv-x', 'id', 'lang', 'orientation', 'style', 'unicode', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
+        glyphRef: ['class', 'dx', 'dy', 'format', 'glyphRef', 'id', 'style', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        hkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space'],
+        image: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        line: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'x1', 'x2', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
+        linearGradient: ['class', 'externalResourcesRequired', 'gradientTransform', 'gradientUnits', 'id', 'spreadMethod', 'style', 'x1', 'x2', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
+        marker: ['class', 'externalResourcesRequired', 'id', 'markerHeight', 'markerUnits', 'markerWidth', 'orient', 'preserveAspectRatio', 'refX', 'refY', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
+        mask: ['class', 'externalResourcesRequired', 'height', 'id', 'maskContentUnits', 'maskUnits', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        metadata: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+        'missing-glyph': ['class', 'd', 'horiz-adv-x', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
+        mpath: ['externalResourcesRequired', 'id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        path: ['class', 'd', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'pathLength', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        pattern: ['class', 'externalResourcesRequired', 'height', 'id', 'patternContentUnits', 'patternTransform', 'patternUnits', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'viewBox', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        polygon: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        polyline: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        radialGradient: ['class', 'cx', 'cy', 'externalResourcesRequired', 'fx', 'fy', 'gradientTransform', 'gradientUnits', 'id', 'r', 'spreadMethod', 'style', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        rect: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        script: ['externalResourcesRequired', 'id', 'type', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        set: ['attributeName', 'attributeType', 'begin', 'dur', 'end', 'externalResourcesRequired', 'fill', 'id', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        stop: ['class', 'id', 'offset', 'style', 'xml:base', 'xml:lang', 'xml:space'],
+        style: ['id', 'media', 'title', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+        svg: ['baseProfile', 'class', 'contentScriptType', 'contentStyleType', 'externalResourcesRequired', 'height', 'id', 'onabort', 'onactivate', 'onclick', 'onerror', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onresize', 'onscroll', 'onunload', 'onzoom', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'version', 'viewBox', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'zoomAndPan'],
+        switch: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+        symbol: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
+        text: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'transform', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        textPath: ['class', 'externalResourcesRequired', 'id', 'lengthAdjust', 'method', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'spacing', 'startOffset', 'style', 'systemLanguage', 'textLength', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+        title: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
+        tref: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        tspan: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        use: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+        view: ['externalResourcesRequired', 'id', 'preserveAspectRatio', 'viewBox', 'viewTarget', 'xml:base', 'xml:lang', 'xml:space', 'zoomAndPan'],
+        vkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space']
+      };
 
-  function createElement(html) {
-    var div = _aureliaPal.DOM.createElement('div');
-    div.innerHTML = html;
-    return div.firstChild;
+
+      svgPresentationElements = {
+        'a': true,
+        'altGlyph': true,
+        'animate': true,
+        'animateColor': true,
+        'circle': true,
+        'clipPath': true,
+        'defs': true,
+        'ellipse': true,
+        'feBlend': true,
+        'feColorMatrix': true,
+        'feComponentTransfer': true,
+        'feComposite': true,
+        'feConvolveMatrix': true,
+        'feDiffuseLighting': true,
+        'feDisplacementMap': true,
+        'feFlood': true,
+        'feGaussianBlur': true,
+        'feImage': true,
+        'feMerge': true,
+        'feMorphology': true,
+        'feOffset': true,
+        'feSpecularLighting': true,
+        'feTile': true,
+        'feTurbulence': true,
+        'filter': true,
+        'font': true,
+        'foreignObject': true,
+        'g': true,
+        'glyph': true,
+        'glyphRef': true,
+        'image': true,
+        'line': true,
+        'linearGradient': true,
+        'marker': true,
+        'mask': true,
+        'missing-glyph': true,
+        'path': true,
+        'pattern': true,
+        'polygon': true,
+        'polyline': true,
+        'radialGradient': true,
+        'rect': true,
+        'stop': true,
+        'svg': true,
+        'switch': true,
+        'symbol': true,
+        'text': true,
+        'textPath': true,
+        'tref': true,
+        'tspan': true,
+        'use': true
+      };
+
+      svgPresentationAttributes = {
+        'alignment-baseline': true,
+        'baseline-shift': true,
+        'clip-path': true,
+        'clip-rule': true,
+        'clip': true,
+        'color-interpolation-filters': true,
+        'color-interpolation': true,
+        'color-profile': true,
+        'color-rendering': true,
+        'color': true,
+        'cursor': true,
+        'direction': true,
+        'display': true,
+        'dominant-baseline': true,
+        'enable-background': true,
+        'fill-opacity': true,
+        'fill-rule': true,
+        'fill': true,
+        'filter': true,
+        'flood-color': true,
+        'flood-opacity': true,
+        'font-family': true,
+        'font-size-adjust': true,
+        'font-size': true,
+        'font-stretch': true,
+        'font-style': true,
+        'font-variant': true,
+        'font-weight': true,
+        'glyph-orientation-horizontal': true,
+        'glyph-orientation-vertical': true,
+        'image-rendering': true,
+        'kerning': true,
+        'letter-spacing': true,
+        'lighting-color': true,
+        'marker-end': true,
+        'marker-mid': true,
+        'marker-start': true,
+        'mask': true,
+        'opacity': true,
+        'overflow': true,
+        'pointer-events': true,
+        'shape-rendering': true,
+        'stop-color': true,
+        'stop-opacity': true,
+        'stroke-dasharray': true,
+        'stroke-dashoffset': true,
+        'stroke-linecap': true,
+        'stroke-linejoin': true,
+        'stroke-miterlimit': true,
+        'stroke-opacity': true,
+        'stroke-width': true,
+        'stroke': true,
+        'text-anchor': true,
+        'text-decoration': true,
+        'text-rendering': true,
+        'unicode-bidi': true,
+        'visibility': true,
+        'word-spacing': true,
+        'writing-mode': true
+      };
+
+      var createElement = function createElement(html) {
+        var div = _aureliaPal.DOM.createElement('div');
+        div.innerHTML = html;
+        return div.firstChild;
+      };
+
+      svgAnalyzer = function () {
+        function SVGAnalyzer() {
+          
+
+          if (createElement('<svg><altGlyph /></svg>').firstElementChild.nodeName === 'altglyph' && elements.altGlyph) {
+            elements.altglyph = elements.altGlyph;
+            delete elements.altGlyph;
+            elements.altglyphdef = elements.altGlyphDef;
+            delete elements.altGlyphDef;
+            elements.altglyphitem = elements.altGlyphItem;
+            delete elements.altGlyphItem;
+            elements.glyphref = elements.glyphRef;
+            delete elements.glyphRef;
+          }
+        }
+
+        SVGAnalyzer.prototype.isStandardSvgAttribute = function isStandardSvgAttribute(nodeName, attributeName) {
+          return presentationElements[nodeName] && presentationAttributes[attributeName] || elements[nodeName] && elements[nodeName].indexOf(attributeName) !== -1;
+        };
+
+        return SVGAnalyzer;
+      }();
+    })();
   }
 
-  var SVGAnalyzer = exports.SVGAnalyzer = function () {
-    function SVGAnalyzer() {
+  var elements = exports.elements = svgElements;
+  var presentationElements = exports.presentationElements = svgPresentationElements;
+  var presentationAttributes = exports.presentationAttributes = svgPresentationAttributes;
+  var SVGAnalyzer = exports.SVGAnalyzer = svgAnalyzer || function () {
+    function _class11() {
       
-
-      if (createElement('<svg><altGlyph /></svg>').firstElementChild.nodeName === 'altglyph' && elements.altGlyph) {
-        elements.altglyph = elements.altGlyph;
-        delete elements.altGlyph;
-        elements.altglyphdef = elements.altGlyphDef;
-        delete elements.altGlyphDef;
-        elements.altglyphitem = elements.altGlyphItem;
-        delete elements.altGlyphItem;
-        elements.glyphref = elements.glyphRef;
-        delete elements.glyphRef;
-      }
     }
 
-    SVGAnalyzer.prototype.isStandardSvgAttribute = function isStandardSvgAttribute(nodeName, attributeName) {
-      return presentationElements[nodeName] && presentationAttributes[attributeName] || elements[nodeName] && elements[nodeName].indexOf(attributeName) !== -1;
+    _class11.prototype.isStandardSvgAttribute = function isStandardSvgAttribute() {
+      return false;
     };
 
-    return SVGAnalyzer;
+    return _class11;
   }();
 
-  var ObserverLocator = exports.ObserverLocator = (_temp = _class11 = function () {
+  var ObserverLocator = exports.ObserverLocator = (_temp = _class12 = function () {
     function ObserverLocator(taskQueue, eventManager, dirtyChecker, svgAnalyzer, parser) {
       
 
@@ -5453,7 +5519,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     return ObserverLocator;
-  }(), _class11.inject = [_aureliaTaskQueue.TaskQueue, EventManager, DirtyChecker, SVGAnalyzer, Parser], _temp);
+  }(), _class12.inject = [_aureliaTaskQueue.TaskQueue, EventManager, DirtyChecker, SVGAnalyzer, Parser], _temp);
 
   var ObjectObservationAdapter = exports.ObjectObservationAdapter = function () {
     function ObjectObservationAdapter() {
@@ -5489,7 +5555,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
   var targetContext = 'Binding:target';
 
-  var Binding = exports.Binding = (_dec10 = connectable(), _dec10(_class12 = function () {
+  var Binding = exports.Binding = (_dec10 = connectable(), _dec10(_class13 = function () {
     function Binding(observerLocator, sourceExpression, target, targetProperty, mode, lookupFunctions) {
       
 
@@ -5599,7 +5665,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     return Binding;
-  }()) || _class12);
+  }()) || _class13);
 
   var CallExpression = exports.CallExpression = function () {
     function CallExpression(observerLocator, targetProperty, sourceExpression, lookupFunctions) {
@@ -5927,7 +5993,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     }
   };
 
-  var BindingEngine = exports.BindingEngine = (_temp2 = _class13 = function () {
+  var BindingEngine = exports.BindingEngine = (_temp2 = _class14 = function () {
     function BindingEngine(observerLocator, parser) {
       
 
@@ -5997,7 +6063,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     return BindingEngine;
-  }(), _class13.inject = [ObserverLocator, Parser], _temp2);
+  }(), _class14.inject = [ObserverLocator, Parser], _temp2);
 
 
   var setProto = Set.prototype;
@@ -6160,266 +6226,273 @@ define('aurelia-polyfills',['aurelia-pal'], function (_aureliaPal) {
     return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj;
   };
 
-  (function (Object, GOPS) {
-    'use strict';
+  if (typeof FEATURE_NO_ES2015 === 'undefined') {
 
-    if (GOPS in Object) return;
+    (function (Object, GOPS) {
+      'use strict';
 
-    var setDescriptor,
-        G = _aureliaPal.PLATFORM.global,
-        id = 0,
-        random = '' + Math.random(),
-        prefix = '__\x01symbol:',
-        prefixLength = prefix.length,
-        internalSymbol = '__\x01symbol@@' + random,
-        DP = 'defineProperty',
-        DPies = 'defineProperties',
-        GOPN = 'getOwnPropertyNames',
-        GOPD = 'getOwnPropertyDescriptor',
-        PIE = 'propertyIsEnumerable',
-        gOPN = Object[GOPN],
-        gOPD = Object[GOPD],
-        create = Object.create,
-        keys = Object.keys,
-        defineProperty = Object[DP],
-        $defineProperties = Object[DPies],
-        descriptor = gOPD(Object, GOPN),
-        ObjectProto = Object.prototype,
-        hOP = ObjectProto.hasOwnProperty,
-        pIE = ObjectProto[PIE],
-        toString = ObjectProto.toString,
-        indexOf = Array.prototype.indexOf || function (v) {
-      for (var i = this.length; i-- && this[i] !== v;) {}
-      return i;
-    },
-        addInternalIfNeeded = function addInternalIfNeeded(o, uid, enumerable) {
-      if (!hOP.call(o, internalSymbol)) {
-        defineProperty(o, internalSymbol, {
-          enumerable: false,
-          configurable: false,
-          writable: false,
-          value: {}
-        });
-      }
-      o[internalSymbol]['@@' + uid] = enumerable;
-    },
-        createWithSymbols = function createWithSymbols(proto, descriptors) {
-      var self = create(proto);
-      gOPN(descriptors).forEach(function (key) {
-        if (propertyIsEnumerable.call(descriptors, key)) {
-          $defineProperty(self, key, descriptors[key]);
-        }
-      });
-      return self;
-    },
-        copyAsNonEnumerable = function copyAsNonEnumerable(descriptor) {
-      var newDescriptor = create(descriptor);
-      newDescriptor.enumerable = false;
-      return newDescriptor;
-    },
-        get = function get() {},
-        onlyNonSymbols = function onlyNonSymbols(name) {
-      return name != internalSymbol && !hOP.call(source, name);
-    },
-        onlySymbols = function onlySymbols(name) {
-      return name != internalSymbol && hOP.call(source, name);
-    },
-        propertyIsEnumerable = function propertyIsEnumerable(key) {
-      var uid = '' + key;
-      return onlySymbols(uid) ? hOP.call(this, uid) && this[internalSymbol]['@@' + uid] : pIE.call(this, key);
-    },
-        setAndGetSymbol = function setAndGetSymbol(uid) {
-      var descriptor = {
-        enumerable: false,
-        configurable: true,
-        get: get,
-        set: function set(value) {
-          setDescriptor(this, uid, {
+      if (GOPS in Object) return;
+
+      var setDescriptor,
+          G = _aureliaPal.PLATFORM.global,
+          id = 0,
+          random = '' + Math.random(),
+          prefix = '__\x01symbol:',
+          prefixLength = prefix.length,
+          internalSymbol = '__\x01symbol@@' + random,
+          DP = 'defineProperty',
+          DPies = 'defineProperties',
+          GOPN = 'getOwnPropertyNames',
+          GOPD = 'getOwnPropertyDescriptor',
+          PIE = 'propertyIsEnumerable',
+          gOPN = Object[GOPN],
+          gOPD = Object[GOPD],
+          create = Object.create,
+          keys = Object.keys,
+          defineProperty = Object[DP],
+          $defineProperties = Object[DPies],
+          descriptor = gOPD(Object, GOPN),
+          ObjectProto = Object.prototype,
+          hOP = ObjectProto.hasOwnProperty,
+          pIE = ObjectProto[PIE],
+          toString = ObjectProto.toString,
+          indexOf = Array.prototype.indexOf || function (v) {
+        for (var i = this.length; i-- && this[i] !== v;) {}
+        return i;
+      },
+          addInternalIfNeeded = function addInternalIfNeeded(o, uid, enumerable) {
+        if (!hOP.call(o, internalSymbol)) {
+          defineProperty(o, internalSymbol, {
             enumerable: false,
-            configurable: true,
-            writable: true,
-            value: value
+            configurable: false,
+            writable: false,
+            value: {}
           });
-          addInternalIfNeeded(this, uid, true);
         }
-      };
-      defineProperty(ObjectProto, uid, descriptor);
-      return source[uid] = defineProperty(Object(uid), 'constructor', sourceConstructor);
-    },
-        _Symbol = function _Symbol2(description) {
-      if (this && this !== G) {
-        throw new TypeError('Symbol is not a constructor');
-      }
-      return setAndGetSymbol(prefix.concat(description || '', random, ++id));
-    },
-        source = create(null),
-        sourceConstructor = { value: _Symbol },
-        sourceMap = function sourceMap(uid) {
-      return source[uid];
-    },
-        $defineProperty = function defineProp(o, key, descriptor) {
-      var uid = '' + key;
-      if (onlySymbols(uid)) {
-        setDescriptor(o, uid, descriptor.enumerable ? copyAsNonEnumerable(descriptor) : descriptor);
-        addInternalIfNeeded(o, uid, !!descriptor.enumerable);
-      } else {
-        defineProperty(o, key, descriptor);
-      }
-      return o;
-    },
-        $getOwnPropertySymbols = function getOwnPropertySymbols(o) {
-      var cof = toString.call(o);
-      o = cof === '[object String]' ? o.split('') : Object(o);
-      return gOPN(o).filter(onlySymbols).map(sourceMap);
-    };
-
-    descriptor.value = $defineProperty;
-    defineProperty(Object, DP, descriptor);
-
-    descriptor.value = $getOwnPropertySymbols;
-    defineProperty(Object, GOPS, descriptor);
-
-    descriptor.value = function getOwnPropertyNames(o) {
-      return gOPN(o).filter(onlyNonSymbols);
-    };
-    defineProperty(Object, GOPN, descriptor);
-
-    descriptor.value = function defineProperties(o, descriptors) {
-      var symbols = $getOwnPropertySymbols(descriptors);
-      if (symbols.length) {
-        keys(descriptors).concat(symbols).forEach(function (uid) {
-          if (propertyIsEnumerable.call(descriptors, uid)) {
-            $defineProperty(o, uid, descriptors[uid]);
+        o[internalSymbol]['@@' + uid] = enumerable;
+      },
+          createWithSymbols = function createWithSymbols(proto, descriptors) {
+        var self = create(proto);
+        gOPN(descriptors).forEach(function (key) {
+          if (propertyIsEnumerable.call(descriptors, key)) {
+            $defineProperty(self, key, descriptors[key]);
           }
         });
-      } else {
-        $defineProperties(o, descriptors);
-      }
-      return o;
-    };
-    defineProperty(Object, DPies, descriptor);
-
-    descriptor.value = propertyIsEnumerable;
-    defineProperty(ObjectProto, PIE, descriptor);
-
-    descriptor.value = _Symbol;
-    defineProperty(G, 'Symbol', descriptor);
-
-    descriptor.value = function (key) {
-      var uid = prefix.concat(prefix, key, random);
-      return uid in ObjectProto ? source[uid] : setAndGetSymbol(uid);
-    };
-    defineProperty(_Symbol, 'for', descriptor);
-
-    descriptor.value = function (symbol) {
-      return hOP.call(source, symbol) ? symbol.slice(prefixLength * 2, -random.length) : void 0;
-    };
-    defineProperty(_Symbol, 'keyFor', descriptor);
-
-    descriptor.value = function getOwnPropertyDescriptor(o, key) {
-      var descriptor = gOPD(o, key);
-      if (descriptor && onlySymbols(key)) {
-        descriptor.enumerable = propertyIsEnumerable.call(o, key);
-      }
-      return descriptor;
-    };
-    defineProperty(Object, GOPD, descriptor);
-
-    descriptor.value = function (proto, descriptors) {
-      return arguments.length === 1 ? create(proto) : createWithSymbols(proto, descriptors);
-    };
-    defineProperty(Object, 'create', descriptor);
-
-    descriptor.value = function () {
-      var str = toString.call(this);
-      return str === '[object String]' && onlySymbols(this) ? '[object Symbol]' : str;
-    };
-    defineProperty(ObjectProto, 'toString', descriptor);
-
-    try {
-      setDescriptor = create(defineProperty({}, prefix, {
-        get: function get() {
-          return defineProperty(this, prefix, { value: false })[prefix];
+        return self;
+      },
+          copyAsNonEnumerable = function copyAsNonEnumerable(descriptor) {
+        var newDescriptor = create(descriptor);
+        newDescriptor.enumerable = false;
+        return newDescriptor;
+      },
+          get = function get() {},
+          onlyNonSymbols = function onlyNonSymbols(name) {
+        return name != internalSymbol && !hOP.call(source, name);
+      },
+          onlySymbols = function onlySymbols(name) {
+        return name != internalSymbol && hOP.call(source, name);
+      },
+          propertyIsEnumerable = function propertyIsEnumerable(key) {
+        var uid = '' + key;
+        return onlySymbols(uid) ? hOP.call(this, uid) && this[internalSymbol]['@@' + uid] : pIE.call(this, key);
+      },
+          setAndGetSymbol = function setAndGetSymbol(uid) {
+        var descriptor = {
+          enumerable: false,
+          configurable: true,
+          get: get,
+          set: function set(value) {
+            setDescriptor(this, uid, {
+              enumerable: false,
+              configurable: true,
+              writable: true,
+              value: value
+            });
+            addInternalIfNeeded(this, uid, true);
+          }
+        };
+        defineProperty(ObjectProto, uid, descriptor);
+        return source[uid] = defineProperty(Object(uid), 'constructor', sourceConstructor);
+      },
+          _Symbol = function _Symbol2(description) {
+        if (this && this !== G) {
+          throw new TypeError('Symbol is not a constructor');
         }
-      }))[prefix] || defineProperty;
-    } catch (o_O) {
-      setDescriptor = function setDescriptor(o, key, descriptor) {
-        var protoDescriptor = gOPD(ObjectProto, key);
-        delete ObjectProto[key];
-        defineProperty(o, key, descriptor);
-        defineProperty(ObjectProto, key, protoDescriptor);
+        return setAndGetSymbol(prefix.concat(description || '', random, ++id));
+      },
+          source = create(null),
+          sourceConstructor = { value: _Symbol },
+          sourceMap = function sourceMap(uid) {
+        return source[uid];
+      },
+          $defineProperty = function defineProp(o, key, descriptor) {
+        var uid = '' + key;
+        if (onlySymbols(uid)) {
+          setDescriptor(o, uid, descriptor.enumerable ? copyAsNonEnumerable(descriptor) : descriptor);
+          addInternalIfNeeded(o, uid, !!descriptor.enumerable);
+        } else {
+          defineProperty(o, key, descriptor);
+        }
+        return o;
+      },
+          $getOwnPropertySymbols = function getOwnPropertySymbols(o) {
+        var cof = toString.call(o);
+        o = cof === '[object String]' ? o.split('') : Object(o);
+        return gOPN(o).filter(onlySymbols).map(sourceMap);
       };
-    }
-  })(Object, 'getOwnPropertySymbols');
 
-  (function (O, S) {
-    var dP = O.defineProperty,
-        ObjectProto = O.prototype,
-        toString = ObjectProto.toString,
-        toStringTag = 'toStringTag',
-        descriptor;
-    ['iterator', 'match', 'replace', 'search', 'split', 'hasInstance', 'isConcatSpreadable', 'unscopables', 'species', 'toPrimitive', toStringTag].forEach(function (name) {
-      if (!(name in Symbol)) {
-        dP(Symbol, name, { value: Symbol(name) });
-        switch (name) {
-          case toStringTag:
-            descriptor = O.getOwnPropertyDescriptor(ObjectProto, 'toString');
-            descriptor.value = function () {
-              var str = toString.call(this),
-                  tst = typeof this === 'undefined' || this === null ? undefined : this[Symbol.toStringTag];
-              return typeof tst === 'undefined' ? str : '[object ' + tst + ']';
-            };
-            dP(ObjectProto, 'toString', descriptor);
-            break;
+      descriptor.value = $defineProperty;
+      defineProperty(Object, DP, descriptor);
+
+      descriptor.value = $getOwnPropertySymbols;
+      defineProperty(Object, GOPS, descriptor);
+
+      descriptor.value = function getOwnPropertyNames(o) {
+        return gOPN(o).filter(onlyNonSymbols);
+      };
+      defineProperty(Object, GOPN, descriptor);
+
+      descriptor.value = function defineProperties(o, descriptors) {
+        var symbols = $getOwnPropertySymbols(descriptors);
+        if (symbols.length) {
+          keys(descriptors).concat(symbols).forEach(function (uid) {
+            if (propertyIsEnumerable.call(descriptors, uid)) {
+              $defineProperty(o, uid, descriptors[uid]);
+            }
+          });
+        } else {
+          $defineProperties(o, descriptors);
         }
+        return o;
+      };
+      defineProperty(Object, DPies, descriptor);
+
+      descriptor.value = propertyIsEnumerable;
+      defineProperty(ObjectProto, PIE, descriptor);
+
+      descriptor.value = _Symbol;
+      defineProperty(G, 'Symbol', descriptor);
+
+      descriptor.value = function (key) {
+        var uid = prefix.concat(prefix, key, random);
+        return uid in ObjectProto ? source[uid] : setAndGetSymbol(uid);
+      };
+      defineProperty(_Symbol, 'for', descriptor);
+
+      descriptor.value = function (symbol) {
+        return hOP.call(source, symbol) ? symbol.slice(prefixLength * 2, -random.length) : void 0;
+      };
+      defineProperty(_Symbol, 'keyFor', descriptor);
+
+      descriptor.value = function getOwnPropertyDescriptor(o, key) {
+        var descriptor = gOPD(o, key);
+        if (descriptor && onlySymbols(key)) {
+          descriptor.enumerable = propertyIsEnumerable.call(o, key);
+        }
+        return descriptor;
+      };
+      defineProperty(Object, GOPD, descriptor);
+
+      descriptor.value = function (proto, descriptors) {
+        return arguments.length === 1 ? create(proto) : createWithSymbols(proto, descriptors);
+      };
+      defineProperty(Object, 'create', descriptor);
+
+      descriptor.value = function () {
+        var str = toString.call(this);
+        return str === '[object String]' && onlySymbols(this) ? '[object Symbol]' : str;
+      };
+      defineProperty(ObjectProto, 'toString', descriptor);
+
+      try {
+        setDescriptor = create(defineProperty({}, prefix, {
+          get: function get() {
+            return defineProperty(this, prefix, { value: false })[prefix];
+          }
+        }))[prefix] || defineProperty;
+      } catch (o_O) {
+        setDescriptor = function setDescriptor(o, key, descriptor) {
+          var protoDescriptor = gOPD(ObjectProto, key);
+          delete ObjectProto[key];
+          defineProperty(o, key, descriptor);
+          defineProperty(ObjectProto, key, protoDescriptor);
+        };
       }
-    });
-  })(Object, Symbol);
+    })(Object, 'getOwnPropertySymbols');
 
-  (function (Si, AP, SP) {
-
-    function returnThis() {
-      return this;
-    }
-
-    if (!AP[Si]) AP[Si] = function () {
-      var i = 0,
-          self = this,
-          iterator = {
-        next: function next() {
-          var done = self.length <= i;
-          return done ? { done: done } : { done: done, value: self[i++] };
+    (function (O, S) {
+      var dP = O.defineProperty,
+          ObjectProto = O.prototype,
+          toString = ObjectProto.toString,
+          toStringTag = 'toStringTag',
+          descriptor;
+      ['iterator', 'match', 'replace', 'search', 'split', 'hasInstance', 'isConcatSpreadable', 'unscopables', 'species', 'toPrimitive', toStringTag].forEach(function (name) {
+        if (!(name in Symbol)) {
+          dP(Symbol, name, { value: Symbol(name) });
+          switch (name) {
+            case toStringTag:
+              descriptor = O.getOwnPropertyDescriptor(ObjectProto, 'toString');
+              descriptor.value = function () {
+                var str = toString.call(this),
+                    tst = typeof this === 'undefined' || this === null ? undefined : this[Symbol.toStringTag];
+                return typeof tst === 'undefined' ? str : '[object ' + tst + ']';
+              };
+              dP(ObjectProto, 'toString', descriptor);
+              break;
+          }
         }
+      });
+    })(Object, Symbol);
+
+    (function (Si, AP, SP) {
+
+      function returnThis() {
+        return this;
+      }
+
+      if (!AP[Si]) AP[Si] = function () {
+        var i = 0,
+            self = this,
+            iterator = {
+          next: function next() {
+            var done = self.length <= i;
+            return done ? { done: done } : { done: done, value: self[i++] };
+          }
+        };
+        iterator[Si] = returnThis;
+        return iterator;
       };
-      iterator[Si] = returnThis;
-      return iterator;
+
+      if (!SP[Si]) SP[Si] = function () {
+        var fromCodePoint = String.fromCodePoint,
+            self = this,
+            i = 0,
+            length = self.length,
+            iterator = {
+          next: function next() {
+            var done = length <= i,
+                c = done ? '' : fromCodePoint(self.codePointAt(i));
+            i += c.length;
+            return done ? { done: done } : { done: done, value: c };
+          }
+        };
+        iterator[Si] = returnThis;
+        return iterator;
+      };
+    })(Symbol.iterator, Array.prototype, String.prototype);
+  }
+
+  if (typeof FEATURE_NO_ES2015 === 'undefined') {
+
+    Number.isNaN = Number.isNaN || function (value) {
+      return value !== value;
     };
 
-    if (!SP[Si]) SP[Si] = function () {
-      var fromCodePoint = String.fromCodePoint,
-          self = this,
-          i = 0,
-          length = self.length,
-          iterator = {
-        next: function next() {
-          var done = length <= i,
-              c = done ? '' : fromCodePoint(self.codePointAt(i));
-          i += c.length;
-          return done ? { done: done } : { done: done, value: c };
-        }
-      };
-      iterator[Si] = returnThis;
-      return iterator;
+    Number.isFinite = Number.isFinite || function (value) {
+      return typeof value === "number" && isFinite(value);
     };
-  })(Symbol.iterator, Array.prototype, String.prototype);
+  }
 
-  Number.isNaN = Number.isNaN || function (value) {
-    return value !== value;
-  };
-
-  Number.isFinite = Number.isFinite || function (value) {
-    return typeof value === "number" && isFinite(value);
-  };
   if (!String.prototype.endsWith || function () {
     try {
       return !"ab".endsWith("a", 1);
@@ -6451,109 +6524,112 @@ define('aurelia-polyfills',['aurelia-pal'], function (_aureliaPal) {
     };
   }
 
-  if (!Array.from) {
-    Array.from = function () {
-      var toInteger = function toInteger(it) {
-        return isNaN(it = +it) ? 0 : (it > 0 ? Math.floor : Math.ceil)(it);
-      };
-      var toLength = function toLength(it) {
-        return it > 0 ? Math.min(toInteger(it), 0x1fffffffffffff) : 0;
-      };
-      var iterCall = function iterCall(iter, fn, val, index) {
-        try {
-          return fn(val, index);
-        } catch (E) {
-          if (typeof iter.return == 'function') iter.return();
-          throw E;
-        }
-      };
+  if (typeof FEATURE_NO_ES2015 === 'undefined') {
 
-      return function from(arrayLike) {
-        var O = Object(arrayLike),
-            C = typeof this == 'function' ? this : Array,
-            aLen = arguments.length,
-            mapfn = aLen > 1 ? arguments[1] : undefined,
-            mapping = mapfn !== undefined,
-            index = 0,
-            iterFn = O[Symbol.iterator],
-            length,
-            result,
-            step,
-            iterator;
-        if (mapping) mapfn = mapfn.bind(aLen > 2 ? arguments[2] : undefined);
-        if (iterFn != undefined && !Array.isArray(arrayLike)) {
-          for (iterator = iterFn.call(O), result = new C(); !(step = iterator.next()).done; index++) {
-            result[index] = mapping ? iterCall(iterator, mapfn, step.value, index) : step.value;
+    if (!Array.from) {
+      Array.from = function () {
+        var toInteger = function toInteger(it) {
+          return isNaN(it = +it) ? 0 : (it > 0 ? Math.floor : Math.ceil)(it);
+        };
+        var toLength = function toLength(it) {
+          return it > 0 ? Math.min(toInteger(it), 0x1fffffffffffff) : 0;
+        };
+        var iterCall = function iterCall(iter, fn, val, index) {
+          try {
+            return fn(val, index);
+          } catch (E) {
+            if (typeof iter.return == 'function') iter.return();
+            throw E;
           }
-        } else {
-          length = toLength(O.length);
-          for (result = new C(length); length > index; index++) {
-            result[index] = mapping ? mapfn(O[index], index) : O[index];
+        };
+
+        return function from(arrayLike) {
+          var O = Object(arrayLike),
+              C = typeof this == 'function' ? this : Array,
+              aLen = arguments.length,
+              mapfn = aLen > 1 ? arguments[1] : undefined,
+              mapping = mapfn !== undefined,
+              index = 0,
+              iterFn = O[Symbol.iterator],
+              length,
+              result,
+              step,
+              iterator;
+          if (mapping) mapfn = mapfn.bind(aLen > 2 ? arguments[2] : undefined);
+          if (iterFn != undefined && !Array.isArray(arrayLike)) {
+            for (iterator = iterFn.call(O), result = new C(); !(step = iterator.next()).done; index++) {
+              result[index] = mapping ? iterCall(iterator, mapfn, step.value, index) : step.value;
+            }
+          } else {
+            length = toLength(O.length);
+            for (result = new C(length); length > index; index++) {
+              result[index] = mapping ? mapfn(O[index], index) : O[index];
+            }
           }
+          result.length = index;
+          return result;
+        };
+      }();
+    }
+
+    if (!Array.prototype.find) {
+      Object.defineProperty(Array.prototype, 'find', {
+        configurable: true,
+        writable: true,
+        enumerable: false,
+        value: function value(predicate) {
+          if (this === null) {
+            throw new TypeError('Array.prototype.find called on null or undefined');
+          }
+          if (typeof predicate !== 'function') {
+            throw new TypeError('predicate must be a function');
+          }
+          var list = Object(this);
+          var length = list.length >>> 0;
+          var thisArg = arguments[1];
+          var value;
+
+          for (var i = 0; i < length; i++) {
+            value = list[i];
+            if (predicate.call(thisArg, value, i, list)) {
+              return value;
+            }
+          }
+          return undefined;
         }
-        result.length = index;
-        return result;
-      };
-    }();
+      });
+    }
+
+    if (!Array.prototype.findIndex) {
+      Object.defineProperty(Array.prototype, 'findIndex', {
+        configurable: true,
+        writable: true,
+        enumerable: false,
+        value: function value(predicate) {
+          if (this === null) {
+            throw new TypeError('Array.prototype.findIndex called on null or undefined');
+          }
+          if (typeof predicate !== 'function') {
+            throw new TypeError('predicate must be a function');
+          }
+          var list = Object(this);
+          var length = list.length >>> 0;
+          var thisArg = arguments[1];
+          var value;
+
+          for (var i = 0; i < length; i++) {
+            value = list[i];
+            if (predicate.call(thisArg, value, i, list)) {
+              return i;
+            }
+          }
+          return -1;
+        }
+      });
+    }
   }
 
-  if (!Array.prototype.find) {
-    Object.defineProperty(Array.prototype, 'find', {
-      configurable: true,
-      writable: true,
-      enumerable: false,
-      value: function value(predicate) {
-        if (this === null) {
-          throw new TypeError('Array.prototype.find called on null or undefined');
-        }
-        if (typeof predicate !== 'function') {
-          throw new TypeError('predicate must be a function');
-        }
-        var list = Object(this);
-        var length = list.length >>> 0;
-        var thisArg = arguments[1];
-        var value;
-
-        for (var i = 0; i < length; i++) {
-          value = list[i];
-          if (predicate.call(thisArg, value, i, list)) {
-            return value;
-          }
-        }
-        return undefined;
-      }
-    });
-  }
-
-  if (!Array.prototype.findIndex) {
-    Object.defineProperty(Array.prototype, 'findIndex', {
-      configurable: true,
-      writable: true,
-      enumerable: false,
-      value: function value(predicate) {
-        if (this === null) {
-          throw new TypeError('Array.prototype.findIndex called on null or undefined');
-        }
-        if (typeof predicate !== 'function') {
-          throw new TypeError('predicate must be a function');
-        }
-        var list = Object(this);
-        var length = list.length >>> 0;
-        var thisArg = arguments[1];
-        var value;
-
-        for (var i = 0; i < length; i++) {
-          value = list[i];
-          if (predicate.call(thisArg, value, i, list)) {
-            return i;
-          }
-        }
-        return -1;
-      }
-    });
-  }
-
-  if (!Array.prototype.includes) {
+  if (typeof FEATURE_NO_ES2016 === 'undefined' && !Array.prototype.includes) {
     Object.defineProperty(Array.prototype, 'includes', {
       configurable: true,
       writable: true,
@@ -6587,377 +6663,394 @@ define('aurelia-polyfills',['aurelia-pal'], function (_aureliaPal) {
     });
   }
 
-  (function () {
-    var needsFix = false;
+  if (typeof FEATURE_NO_ES2015 === 'undefined') {
 
-    try {
-      var s = Object.keys('a');
-      needsFix = s.length !== 1 || s[0] !== '0';
-    } catch (e) {
-      needsFix = true;
-    }
+    (function () {
+      var needsFix = false;
 
-    if (needsFix) {
-      Object.keys = function () {
-        var hasOwnProperty = Object.prototype.hasOwnProperty,
-            hasDontEnumBug = !{ toString: null }.propertyIsEnumerable('toString'),
-            dontEnums = ['toString', 'toLocaleString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable', 'constructor'],
-            dontEnumsLength = dontEnums.length;
+      try {
+        var s = Object.keys('a');
+        needsFix = s.length !== 1 || s[0] !== '0';
+      } catch (e) {
+        needsFix = true;
+      }
 
-        return function (obj) {
-          if (obj === undefined || obj === null) {
-            throw TypeError('Cannot convert undefined or null to object');
-          }
+      if (needsFix) {
+        Object.keys = function () {
+          var hasOwnProperty = Object.prototype.hasOwnProperty,
+              hasDontEnumBug = !{ toString: null }.propertyIsEnumerable('toString'),
+              dontEnums = ['toString', 'toLocaleString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable', 'constructor'],
+              dontEnumsLength = dontEnums.length;
 
-          obj = Object(obj);
-
-          var result = [],
-              prop,
-              i;
-
-          for (prop in obj) {
-            if (hasOwnProperty.call(obj, prop)) {
-              result.push(prop);
+          return function (obj) {
+            if (obj === undefined || obj === null) {
+              throw TypeError('Cannot convert undefined or null to object');
             }
-          }
 
-          if (hasDontEnumBug) {
-            for (i = 0; i < dontEnumsLength; i++) {
-              if (hasOwnProperty.call(obj, dontEnums[i])) {
-                result.push(dontEnums[i]);
+            obj = Object(obj);
+
+            var result = [],
+                prop,
+                i;
+
+            for (prop in obj) {
+              if (hasOwnProperty.call(obj, prop)) {
+                result.push(prop);
               }
             }
-          }
 
-          return result;
-        };
-      }();
-    }
-  })();
-
-  (function (O) {
-    if ('assign' in O) {
-      return;
-    }
-
-    O.defineProperty(O, 'assign', {
-      configurable: true,
-      writable: true,
-      value: function () {
-        var gOPS = O.getOwnPropertySymbols,
-            pIE = O.propertyIsEnumerable,
-            filterOS = gOPS ? function (self) {
-          return gOPS(self).filter(pIE, self);
-        } : function () {
-          return Array.prototype;
-        };
-
-        return function assign(where) {
-          if (gOPS && !(where instanceof O)) {
-            console.warn('problematic Symbols', where);
-          }
-
-          function set(keyOrSymbol) {
-            where[keyOrSymbol] = arg[keyOrSymbol];
-          }
-
-          for (var i = 1, ii = arguments.length; i < ii; ++i) {
-            var arg = arguments[i];
-
-            if (arg === null || arg === undefined) {
-              continue;
+            if (hasDontEnumBug) {
+              for (i = 0; i < dontEnumsLength; i++) {
+                if (hasOwnProperty.call(obj, dontEnums[i])) {
+                  result.push(dontEnums[i]);
+                }
+              }
             }
 
-            O.keys(arg).concat(filterOS(arg)).forEach(set);
-          }
+            return result;
+          };
+        }();
+      }
+    })();
 
-          return where;
-        };
-      }()
-    });
-  })(Object);
-
-  (function (global) {
-    var i;
-
-    var defineProperty = Object.defineProperty,
-        is = function is(a, b) {
-      return a === b || a !== a && b !== b;
-    };
-
-    if (typeof WeakMap == 'undefined') {
-      global.WeakMap = createCollection({
-        'delete': sharedDelete,
-
-        clear: sharedClear,
-
-        get: sharedGet,
-
-        has: mapHas,
-
-        set: sharedSet
-      }, true);
-    }
-
-    if (typeof Map == 'undefined' || typeof new Map().values !== 'function' || !new Map().values().next) {
-      var _createCollection;
-
-      global.Map = createCollection((_createCollection = {
-        'delete': sharedDelete,
-
-        has: mapHas,
-
-        get: sharedGet,
-
-        set: sharedSet,
-
-        keys: sharedKeys,
-
-        values: sharedValues,
-
-        entries: mapEntries,
-
-        forEach: sharedForEach,
-
-        clear: sharedClear
-      }, _createCollection[Symbol.iterator] = mapEntries, _createCollection));
-    }
-
-    if (typeof Set == 'undefined' || typeof new Set().values !== 'function' || !new Set().values().next) {
-      var _createCollection2;
-
-      global.Set = createCollection((_createCollection2 = {
-        has: setHas,
-
-        add: sharedAdd,
-
-        'delete': sharedDelete,
-
-        clear: sharedClear,
-
-        keys: sharedValues,
-        values: sharedValues,
-
-        entries: setEntries,
-
-        forEach: sharedForEach
-      }, _createCollection2[Symbol.iterator] = sharedValues, _createCollection2));
-    }
-
-    if (typeof WeakSet == 'undefined') {
-      global.WeakSet = createCollection({
-        'delete': sharedDelete,
-
-        add: sharedAdd,
-
-        clear: sharedClear,
-
-        has: setHas
-      }, true);
-    }
-
-    function createCollection(proto, objectOnly) {
-      function Collection(a) {
-        if (!this || this.constructor !== Collection) return new Collection(a);
-        this._keys = [];
-        this._values = [];
-        this._itp = [];
-        this.objectOnly = objectOnly;
-
-        if (a) init.call(this, a);
+    (function (O) {
+      if ('assign' in O) {
+        return;
       }
 
-      if (!objectOnly) {
-        defineProperty(proto, 'size', {
-          get: sharedSize
-        });
-      }
+      O.defineProperty(O, 'assign', {
+        configurable: true,
+        writable: true,
+        value: function () {
+          var gOPS = O.getOwnPropertySymbols,
+              pIE = O.propertyIsEnumerable,
+              filterOS = gOPS ? function (self) {
+            return gOPS(self).filter(pIE, self);
+          } : function () {
+            return Array.prototype;
+          };
 
-      proto.constructor = Collection;
-      Collection.prototype = proto;
+          return function assign(where) {
+            if (gOPS && !(where instanceof O)) {
+              console.warn('problematic Symbols', where);
+            }
 
-      return Collection;
-    }
+            function set(keyOrSymbol) {
+              where[keyOrSymbol] = arg[keyOrSymbol];
+            }
 
-    function init(a) {
+            for (var i = 1, ii = arguments.length; i < ii; ++i) {
+              var arg = arguments[i];
+
+              if (arg === null || arg === undefined) {
+                continue;
+              }
+
+              O.keys(arg).concat(filterOS(arg)).forEach(set);
+            }
+
+            return where;
+          };
+        }()
+      });
+    })(Object);
+  }
+
+  if (typeof FEATURE_NO_ES2015 === 'undefined') {
+
+    (function (global) {
       var i;
 
-      if (this.add) a.forEach(this.add, this);else a.forEach(function (a) {
-          this.set(a[0], a[1]);
-        }, this);
-    }
-
-    function sharedDelete(key) {
-      if (this.has(key)) {
-        this._keys.splice(i, 1);
-        this._values.splice(i, 1);
-
-        this._itp.forEach(function (p) {
-          if (i < p[0]) p[0]--;
-        });
-      }
-
-      return -1 < i;
-    };
-
-    function sharedGet(key) {
-      return this.has(key) ? this._values[i] : undefined;
-    }
-
-    function has(list, key) {
-      if (this.objectOnly && key !== Object(key)) throw new TypeError("Invalid value used as weak collection key");
-
-      if (key != key || key === 0) for (i = list.length; i-- && !is(list[i], key);) {} else i = list.indexOf(key);
-      return -1 < i;
-    }
-
-    function setHas(value) {
-      return has.call(this, this._values, value);
-    }
-
-    function mapHas(value) {
-      return has.call(this, this._keys, value);
-    }
-
-    function sharedSet(key, value) {
-      this.has(key) ? this._values[i] = value : this._values[this._keys.push(key) - 1] = value;
-      return this;
-    }
-
-    function sharedAdd(value) {
-      if (!this.has(value)) this._values.push(value);
-      return this;
-    }
-
-    function sharedClear() {
-      (this._keys || 0).length = this._values.length = 0;
-    }
-
-    function sharedKeys() {
-      return sharedIterator(this._itp, this._keys);
-    }
-
-    function sharedValues() {
-      return sharedIterator(this._itp, this._values);
-    }
-
-    function mapEntries() {
-      return sharedIterator(this._itp, this._keys, this._values);
-    }
-
-    function setEntries() {
-      return sharedIterator(this._itp, this._values, this._values);
-    }
-
-    function sharedIterator(itp, array, array2) {
-      var _ref;
-
-      var p = [0],
-          done = false;
-      itp.push(p);
-      return _ref = {}, _ref[Symbol.iterator] = function () {
-        return this;
-      }, _ref.next = function next() {
-        var v,
-            k = p[0];
-        if (!done && k < array.length) {
-          v = array2 ? [array[k], array2[k]] : array[k];
-          p[0]++;
-        } else {
-          done = true;
-          itp.splice(itp.indexOf(p), 1);
-        }
-        return { done: done, value: v };
-      }, _ref;
-    }
-
-    function sharedSize() {
-      return this._values.length;
-    }
-
-    function sharedForEach(callback, context) {
-      var it = this.entries();
-      for (;;) {
-        var r = it.next();
-        if (r.done) break;
-        callback.call(context, r.value[1], r.value[0], this);
-      }
-    }
-  })(_aureliaPal.PLATFORM.global);
-
-  var emptyMetadata = Object.freeze({});
-  var metadataContainerKey = '__metadata__';
-  var bind = Function.prototype.bind;
-
-  if (typeof _aureliaPal.PLATFORM.global.Reflect === 'undefined') {
-    _aureliaPal.PLATFORM.global.Reflect = {};
-  }
-
-  if (typeof Reflect.getOwnMetadata !== 'function') {
-    Reflect.getOwnMetadata = function (metadataKey, target, targetKey) {
-      if (target.hasOwnProperty(metadataContainerKey)) {
-        return (target[metadataContainerKey][targetKey] || emptyMetadata)[metadataKey];
-      }
-    };
-  }
-
-  if (typeof Reflect.defineMetadata !== 'function') {
-    Reflect.defineMetadata = function (metadataKey, metadataValue, target, targetKey) {
-      var metadataContainer = target.hasOwnProperty(metadataContainerKey) ? target[metadataContainerKey] : target[metadataContainerKey] = {};
-      var targetContainer = metadataContainer[targetKey] || (metadataContainer[targetKey] = {});
-      targetContainer[metadataKey] = metadataValue;
-    };
-  }
-
-  if (typeof Reflect.metadata !== 'function') {
-    Reflect.metadata = function (metadataKey, metadataValue) {
-      return function (target, targetKey) {
-        Reflect.defineMetadata(metadataKey, metadataValue, target, targetKey);
+      var defineProperty = Object.defineProperty,
+          is = function is(a, b) {
+        return a === b || a !== a && b !== b;
       };
-    };
-  }
 
-  if (typeof Reflect.defineProperty !== 'function') {
-    Reflect.defineProperty = function (target, propertyKey, descriptor) {
-      if ((typeof target === 'undefined' ? 'undefined' : _typeof(target)) === 'object' ? target === null : typeof target !== 'function') {
-        throw new TypeError('Reflect.defineProperty called on non-object');
-      }
-      try {
-        Object.defineProperty(target, propertyKey, descriptor);
-        return true;
-      } catch (e) {
-        return false;
-      }
-    };
-  }
+      if (typeof WeakMap == 'undefined') {
+        global.WeakMap = createCollection({
+          'delete': sharedDelete,
 
-  if (typeof Reflect.construct !== 'function') {
-    Reflect.construct = function (Target, args) {
-      if (args) {
-        switch (args.length) {
-          case 0:
-            return new Target();
-          case 1:
-            return new Target(args[0]);
-          case 2:
-            return new Target(args[0], args[1]);
-          case 3:
-            return new Target(args[0], args[1], args[2]);
-          case 4:
-            return new Target(args[0], args[1], args[2], args[3]);
+          clear: sharedClear,
+
+          get: sharedGet,
+
+          has: mapHas,
+
+          set: sharedSet
+        }, true);
+      }
+
+      if (typeof Map == 'undefined' || typeof new Map().values !== 'function' || !new Map().values().next) {
+        var _createCollection;
+
+        global.Map = createCollection((_createCollection = {
+          'delete': sharedDelete,
+
+          has: mapHas,
+
+          get: sharedGet,
+
+          set: sharedSet,
+
+          keys: sharedKeys,
+
+          values: sharedValues,
+
+          entries: mapEntries,
+
+          forEach: sharedForEach,
+
+          clear: sharedClear
+        }, _createCollection[Symbol.iterator] = mapEntries, _createCollection));
+      }
+
+      if (typeof Set == 'undefined' || typeof new Set().values !== 'function' || !new Set().values().next) {
+        var _createCollection2;
+
+        global.Set = createCollection((_createCollection2 = {
+          has: setHas,
+
+          add: sharedAdd,
+
+          'delete': sharedDelete,
+
+          clear: sharedClear,
+
+          keys: sharedValues,
+          values: sharedValues,
+
+          entries: setEntries,
+
+          forEach: sharedForEach
+        }, _createCollection2[Symbol.iterator] = sharedValues, _createCollection2));
+      }
+
+      if (typeof WeakSet == 'undefined') {
+        global.WeakSet = createCollection({
+          'delete': sharedDelete,
+
+          add: sharedAdd,
+
+          clear: sharedClear,
+
+          has: setHas
+        }, true);
+      }
+
+      function createCollection(proto, objectOnly) {
+        function Collection(a) {
+          if (!this || this.constructor !== Collection) return new Collection(a);
+          this._keys = [];
+          this._values = [];
+          this._itp = [];
+          this.objectOnly = objectOnly;
+
+          if (a) init.call(this, a);
+        }
+
+        if (!objectOnly) {
+          defineProperty(proto, 'size', {
+            get: sharedSize
+          });
+        }
+
+        proto.constructor = Collection;
+        Collection.prototype = proto;
+
+        return Collection;
+      }
+
+      function init(a) {
+        var i;
+
+        if (this.add) a.forEach(this.add, this);else a.forEach(function (a) {
+            this.set(a[0], a[1]);
+          }, this);
+      }
+
+      function sharedDelete(key) {
+        if (this.has(key)) {
+          this._keys.splice(i, 1);
+          this._values.splice(i, 1);
+
+          this._itp.forEach(function (p) {
+            if (i < p[0]) p[0]--;
+          });
+        }
+
+        return -1 < i;
+      };
+
+      function sharedGet(key) {
+        return this.has(key) ? this._values[i] : undefined;
+      }
+
+      function has(list, key) {
+        if (this.objectOnly && key !== Object(key)) throw new TypeError("Invalid value used as weak collection key");
+
+        if (key != key || key === 0) for (i = list.length; i-- && !is(list[i], key);) {} else i = list.indexOf(key);
+        return -1 < i;
+      }
+
+      function setHas(value) {
+        return has.call(this, this._values, value);
+      }
+
+      function mapHas(value) {
+        return has.call(this, this._keys, value);
+      }
+
+      function sharedSet(key, value) {
+        this.has(key) ? this._values[i] = value : this._values[this._keys.push(key) - 1] = value;
+        return this;
+      }
+
+      function sharedAdd(value) {
+        if (!this.has(value)) this._values.push(value);
+        return this;
+      }
+
+      function sharedClear() {
+        (this._keys || 0).length = this._values.length = 0;
+      }
+
+      function sharedKeys() {
+        return sharedIterator(this._itp, this._keys);
+      }
+
+      function sharedValues() {
+        return sharedIterator(this._itp, this._values);
+      }
+
+      function mapEntries() {
+        return sharedIterator(this._itp, this._keys, this._values);
+      }
+
+      function setEntries() {
+        return sharedIterator(this._itp, this._values, this._values);
+      }
+
+      function sharedIterator(itp, array, array2) {
+        var _ref;
+
+        var p = [0],
+            done = false;
+        itp.push(p);
+        return _ref = {}, _ref[Symbol.iterator] = function () {
+          return this;
+        }, _ref.next = function next() {
+          var v,
+              k = p[0];
+          if (!done && k < array.length) {
+            v = array2 ? [array[k], array2[k]] : array[k];
+            p[0]++;
+          } else {
+            done = true;
+            itp.splice(itp.indexOf(p), 1);
+          }
+          return { done: done, value: v };
+        }, _ref;
+      }
+
+      function sharedSize() {
+        return this._values.length;
+      }
+
+      function sharedForEach(callback, context) {
+        var it = this.entries();
+        for (;;) {
+          var r = it.next();
+          if (r.done) break;
+          callback.call(context, r.value[1], r.value[0], this);
         }
       }
-
-      var a = [null];
-      a.push.apply(a, args);
-      return new (bind.apply(Target, a))();
-    };
+    })(_aureliaPal.PLATFORM.global);
   }
 
-  if (typeof Reflect.ownKeys !== 'function') {
-    Reflect.ownKeys = function (o) {
-      return Object.getOwnPropertyNames(o).concat(Object.getOwnPropertySymbols(o));
-    };
+  if (typeof FEATURE_NO_ES2015 === 'undefined') {
+    (function () {
+
+      var bind = Function.prototype.bind;
+
+      if (typeof _aureliaPal.PLATFORM.global.Reflect === 'undefined') {
+        _aureliaPal.PLATFORM.global.Reflect = {};
+      }
+
+      if (typeof Reflect.defineProperty !== 'function') {
+        Reflect.defineProperty = function (target, propertyKey, descriptor) {
+          if ((typeof target === 'undefined' ? 'undefined' : _typeof(target)) === 'object' ? target === null : typeof target !== 'function') {
+            throw new TypeError('Reflect.defineProperty called on non-object');
+          }
+          try {
+            Object.defineProperty(target, propertyKey, descriptor);
+            return true;
+          } catch (e) {
+            return false;
+          }
+        };
+      }
+
+      if (typeof Reflect.construct !== 'function') {
+        Reflect.construct = function (Target, args) {
+          if (args) {
+            switch (args.length) {
+              case 0:
+                return new Target();
+              case 1:
+                return new Target(args[0]);
+              case 2:
+                return new Target(args[0], args[1]);
+              case 3:
+                return new Target(args[0], args[1], args[2]);
+              case 4:
+                return new Target(args[0], args[1], args[2], args[3]);
+            }
+          }
+
+          var a = [null];
+          a.push.apply(a, args);
+          return new (bind.apply(Target, a))();
+        };
+      }
+
+      if (typeof Reflect.ownKeys !== 'function') {
+        Reflect.ownKeys = function (o) {
+          return Object.getOwnPropertyNames(o).concat(Object.getOwnPropertySymbols(o));
+        };
+      }
+    })();
+  }
+
+  if (typeof FEATURE_NO_ESNEXT === 'undefined') {
+    (function () {
+
+      var emptyMetadata = Object.freeze({});
+      var metadataContainerKey = '__metadata__';
+
+      if (typeof Reflect.getOwnMetadata !== 'function') {
+        Reflect.getOwnMetadata = function (metadataKey, target, targetKey) {
+          if (target.hasOwnProperty(metadataContainerKey)) {
+            return (target[metadataContainerKey][targetKey] || emptyMetadata)[metadataKey];
+          }
+        };
+      }
+
+      if (typeof Reflect.defineMetadata !== 'function') {
+        Reflect.defineMetadata = function (metadataKey, metadataValue, target, targetKey) {
+          var metadataContainer = target.hasOwnProperty(metadataContainerKey) ? target[metadataContainerKey] : target[metadataContainerKey] = {};
+          var targetContainer = metadataContainer[targetKey] || (metadataContainer[targetKey] = {});
+          targetContainer[metadataKey] = metadataValue;
+        };
+      }
+
+      if (typeof Reflect.metadata !== 'function') {
+        Reflect.metadata = function (metadataKey, metadataValue) {
+          return function (target, targetKey) {
+            Reflect.defineMetadata(metadataKey, metadataValue, target, targetKey);
+          };
+        };
+      }
+    })();
   }
 });
 define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-polyfills'], function (module, exports, _aureliaPal) {
@@ -6970,36 +7063,23 @@ define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-poly
   exports.bootstrap = bootstrap;
 
 
-  var bootstrapQueue = [];
-  var sharedLoader = null;
-  var Aurelia = null;
+  var bootstrapPromises = [];
+  var startResolve = void 0;
+
+  var startPromise = new Promise(function (resolve) {
+    return startResolve = resolve;
+  });
   var host = _aureliaPal.PLATFORM.global;
   var isNodeLike = typeof process !== 'undefined' && !process.browser;
 
-  function onBootstrap(callback) {
-    return new Promise(function (resolve, reject) {
-      if (sharedLoader) {
-        resolve(callback(sharedLoader));
-      } else {
-        bootstrapQueue.push(function () {
-          try {
-            resolve(callback(sharedLoader));
-          } catch (e) {
-            reject(e);
-          }
-        });
-      }
-    });
-  }
-
   function ready() {
-    return new Promise(function (resolve, reject) {
-      if (!host.document || host.document.readyState === 'complete') {
-        resolve();
-      } else {
-        host.document.addEventListener('DOMContentLoaded', completed);
-        host.addEventListener('load', completed);
-      }
+    if (!host.document || host.document.readyState === 'complete') {
+      return Promise.resolve();
+    }
+
+    return new Promise(function (resolve) {
+      host.document.addEventListener('DOMContentLoaded', completed);
+      host.addEventListener('load', completed);
 
       function completed() {
         host.document.removeEventListener('DOMContentLoaded', completed);
@@ -7014,32 +7094,34 @@ define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-poly
       return Promise.resolve(new _aureliaPal.PLATFORM.Loader());
     }
 
-    if (typeof __webpack_require__ !== 'undefined') {
-      var m = __webpack_require__(require.resolve('aurelia-loader-webpack'));
-      return Promise.resolve(new m.WebpackLoader());
-    }
+    if (typeof AURELIA_WEBPACK_2_0 === 'undefined') {
+      if (typeof __webpack_require__ !== 'undefined') {
+        var m = __webpack_require__(require.resolve('aurelia-loader-webpack'));
+        return Promise.resolve(new m.WebpackLoader());
+      }
 
-    if (host.System && typeof host.System.config === 'function') {
-      return host.System.normalize('aurelia-bootstrapper').then(function (bsn) {
-        return host.System.normalize('aurelia-loader-default', bsn);
-      }).then(function (loaderName) {
-        return host.System.import(loaderName).then(function (m) {
-          return new m.DefaultLoader();
+      if (host.System && typeof host.System.config === 'function') {
+        return host.System.normalize('aurelia-bootstrapper').then(function (bsn) {
+          return host.System.normalize('aurelia-loader-default', bsn);
+        }).then(function (loaderName) {
+          return host.System.import(loaderName).then(function (m) {
+            return new m.DefaultLoader();
+          });
         });
-      });
-    }
+      }
 
-    if (typeof host.require === 'function' && typeof host.require.version === 'string') {
-      return new Promise(function (resolve, reject) {
-        return host.require(['aurelia-loader-default'], function (m) {
-          return resolve(new m.DefaultLoader());
-        }, reject);
-      });
-    }
+      if (typeof host.require === 'function' && typeof host.require.version === 'string') {
+        return new Promise(function (resolve, reject) {
+          return host.require(['aurelia-loader-default'], function (m) {
+            return resolve(new m.DefaultLoader());
+          }, reject);
+        });
+      }
 
-    if (isNodeLike && typeof module !== 'undefined' && typeof module.require !== 'undefined') {
-      var _m = module.require('aurelia-loader-nodejs');
-      return Promise.resolve(new _m.NodeJsLoader());
+      if (isNodeLike && typeof module !== 'undefined' && typeof module.require !== 'undefined') {
+        var _m = module.require('aurelia-loader-nodejs');
+        return Promise.resolve(new _m.NodeJsLoader());
+      }
     }
 
     return Promise.reject('No PLATFORM.Loader is defined and there is neither a System API (ES6) or a Require API (AMD) globally available to load your app.');
@@ -7066,44 +7148,43 @@ define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-poly
   }
 
   function preparePlatform(loader) {
+    var map = function map(moduleId, relativeTo) {
+      return loader.normalize(moduleId, relativeTo).then(function (normalized) {
+        loader.map(moduleId, normalized);
+        return normalized;
+      });
+    };
+
     return initializePal(loader).then(function () {
       return loader.normalize('aurelia-bootstrapper');
     }).then(function (bootstrapperName) {
-      return loader.normalize('aurelia-framework', bootstrapperName).then(function (frameworkName) {
-        loader.map('aurelia-framework', frameworkName);
+      var frameworkPromise = map(_aureliaPal.PLATFORM.moduleName('aurelia-framework', { exports: ['Aurelia'] }), bootstrapperName);
 
-        return Promise.all([loader.normalize('aurelia-dependency-injection', frameworkName).then(function (diName) {
-          return loader.map('aurelia-dependency-injection', diName);
-        }), loader.normalize('aurelia-router', bootstrapperName).then(function (routerName) {
-          return loader.map('aurelia-router', routerName);
-        }), loader.normalize('aurelia-logging-console', bootstrapperName).then(function (loggingConsoleName) {
-          return loader.map('aurelia-logging-console', loggingConsoleName);
-        })]).then(function () {
-          return loader.loadModule(frameworkName).then(function (m) {
-            return Aurelia = m.Aurelia;
-          });
-        });
+      return Promise.all([frameworkPromise, frameworkPromise.then(function (frameworkName) {
+        return map('aurelia-dependency-injection', frameworkName);
+      }), map('aurelia-router', bootstrapperName), map('aurelia-logging-console', bootstrapperName)]);
+    }).then(function (_ref) {
+      var frameworkName = _ref[0];
+      return loader.loadModule(frameworkName);
+    }).then(function (_ref2) {
+      var Aurelia = _ref2.Aurelia;
+      return startResolve(function () {
+        return new Aurelia(loader);
       });
     });
   }
 
-  function handleApp(loader, appHost) {
-    var moduleId = appHost.getAttribute('aurelia-app') || appHost.getAttribute('data-aurelia-app');
-    return config(loader, appHost, moduleId);
-  }
-
-  function config(loader, appHost, configModuleId) {
-    var aurelia = new Aurelia(loader);
+  function config(appHost, configModuleId, aurelia) {
     aurelia.host = appHost;
     aurelia.configModuleId = configModuleId || null;
 
     if (configModuleId) {
-      return loader.loadModule(configModuleId).then(function (customConfig) {
+      return aurelia.loader.loadModule(configModuleId).then(function (customConfig) {
         if (!customConfig.configure) {
-          throw new Error("Cannot initialize module '" + configModuleId + "' without a configure function.");
+          throw new Error('Cannot initialize module \'' + configModuleId + '\' without a configure function.');
         }
 
-        customConfig.configure(aurelia);
+        return customConfig.configure(aurelia);
       });
     }
 
@@ -7115,31 +7196,29 @@ define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-poly
   }
 
   function run() {
-    return ready().then(function () {
-      return createLoader();
-    }).then(function (loader) {
-      return preparePlatform(loader).then(function () {
-        var appHost = host.document.querySelectorAll('[aurelia-app],[data-aurelia-app]');
-        var toConsole = console.error.bind(console);
+    return ready().then(createLoader).then(preparePlatform).then(function () {
+      var appHosts = host.document.querySelectorAll('[aurelia-app],[data-aurelia-app]');
+      for (var i = 0, ii = appHosts.length; i < ii; ++i) {
+        var appHost = appHosts[i];
+        var moduleId = appHost.getAttribute('aurelia-app') || appHost.getAttribute('data-aurelia-app');
+        bootstrap(config.bind(null, appHost, moduleId));
+      }
 
-        for (var i = 0, ii = appHost.length; i < ii; ++i) {
-          handleApp(loader, appHost[i]).catch(toConsole);
-        }
-
-        sharedLoader = loader;
-        for (var _i = 0, _ii = bootstrapQueue.length; _i < _ii; ++_i) {
-          bootstrapQueue[_i]();
-        }
-        bootstrapQueue = null;
+      var toConsole = console.error.bind(console);
+      var bootstraps = bootstrapPromises.map(function (p) {
+        return p.catch(toConsole);
       });
+      bootstrapPromises = null;
+      return Promise.all(bootstraps);
     });
   }
 
   function bootstrap(configure) {
-    return onBootstrap(function (loader) {
-      var aurelia = new Aurelia(loader);
-      return configure(aurelia);
+    var p = startPromise.then(function (factory) {
+      return configure(factory());
     });
+    if (bootstrapPromises) bootstrapPromises.push(p);
+    return p;
   }
 
   var starting = exports.starting = run();
@@ -8441,7 +8520,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.TemplatingEngine = exports.ElementConfigResource = exports.CompositionEngine = exports.HtmlBehaviorResource = exports.BindableProperty = exports.BehaviorPropertyObserver = exports.Controller = exports.ViewEngine = exports.ModuleAnalyzer = exports.ResourceDescription = exports.ResourceModule = exports.ViewCompiler = exports.ViewFactory = exports.BoundViewFactory = exports.ViewSlot = exports.View = exports.ViewResources = exports.ShadowDOM = exports.ShadowSlot = exports.PassThroughSlot = exports.SlotCustomAttribute = exports.BindingLanguage = exports.ViewLocator = exports.InlineViewStrategy = exports.TemplateRegistryViewStrategy = exports.NoViewStrategy = exports.ConventionalViewStrategy = exports.RelativeViewStrategy = exports.viewStrategy = exports.TargetInstruction = exports.BehaviorInstruction = exports.ViewCompileInstruction = exports.ResourceLoadContext = exports.ElementEvents = exports.ViewEngineHooksResource = exports.CompositionTransaction = exports.CompositionTransactionOwnershipToken = exports.CompositionTransactionNotifier = exports.Animator = exports.animationEvent = undefined;
+  exports.TemplatingEngine = exports.ElementConfigResource = exports.CompositionEngine = exports.SwapStrategies = exports.HtmlBehaviorResource = exports.BindableProperty = exports.BehaviorPropertyObserver = exports.Controller = exports.ViewEngine = exports.ModuleAnalyzer = exports.ResourceDescription = exports.ResourceModule = exports.ViewCompiler = exports.ViewFactory = exports.BoundViewFactory = exports.ViewSlot = exports.View = exports.ViewResources = exports.ShadowDOM = exports.ShadowSlot = exports.PassThroughSlot = exports.SlotCustomAttribute = exports.BindingLanguage = exports.ViewLocator = exports.InlineViewStrategy = exports.TemplateRegistryViewStrategy = exports.NoViewStrategy = exports.ConventionalViewStrategy = exports.RelativeViewStrategy = exports.viewStrategy = exports.TargetInstruction = exports.BehaviorInstruction = exports.ViewCompileInstruction = exports.ResourceLoadContext = exports.ElementEvents = exports.ViewEngineHooksResource = exports.CompositionTransaction = exports.CompositionTransactionOwnershipToken = exports.CompositionTransactionNotifier = exports.Animator = exports.animationEvent = undefined;
   exports._hyphenate = _hyphenate;
   exports._isAllWhitespace = _isAllWhitespace;
   exports.viewEngineHooks = viewEngineHooks;
@@ -10319,7 +10398,11 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
         if (returnToCache) {
           for (i = 0; i < ii; ++i) {
-            children[i].returnToCache();
+            var _child3 = children[i];
+
+            if (_child3) {
+              _child3.returnToCache();
+            }
           }
         }
 
@@ -10903,10 +10986,10 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
     if (node.innerHTML.trim()) {
       var fragment = _aureliaPal.DOM.createDocumentFragment();
-      var _child3 = void 0;
+      var _child4 = void 0;
 
-      while (_child3 = node.firstChild) {
-        fragment.appendChild(_child3);
+      while (_child4 = node.firstChild) {
+        fragment.appendChild(_child4);
       }
 
       instruction.slotFallbackFactory = compiler.compile(fragment, resources);
@@ -11051,7 +11134,10 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
               }
 
               if (info.command && info.command !== 'options' && type.primaryProperty) {
-                attrName = info.attrName = type.primaryProperty.name;
+                var primaryProperty = type.primaryProperty;
+                attrName = info.attrName = primaryProperty.name;
+
+                info.defaultBindingMode = primaryProperty.defaultBindingMode;
               }
             }
           }
@@ -11185,7 +11271,10 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
               }
 
               if (info.command && info.command !== 'options' && type.primaryProperty) {
-                attrName = info.attrName = type.primaryProperty.name;
+                var primaryProperty = type.primaryProperty;
+                attrName = info.attrName = primaryProperty.name;
+
+                info.defaultBindingMode = primaryProperty.defaultBindingMode;
               }
             }
           }
@@ -12594,6 +12683,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
       if (descriptor) {
         descriptor.writable = true;
+        descriptor.configurable = true;
       }
 
       selectorOrConfig.all = all;
@@ -12850,6 +12940,24 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     return ChildObserverBinder;
   }();
 
+  function remove(viewSlot, previous) {
+    return Array.isArray(previous) ? viewSlot.removeMany(previous, true) : viewSlot.remove(previous, true);
+  }
+
+  var SwapStrategies = exports.SwapStrategies = {
+    before: function before(viewSlot, previous, callback) {
+      return previous === undefined ? callback() : callback().then(function () {
+        return remove(viewSlot, previous);
+      });
+    },
+    with: function _with(viewSlot, previous, callback) {
+      return previous === undefined ? callback() : Promise.all([remove(viewSlot, previous), callback()]);
+    },
+    after: function after(viewSlot, previous, callback) {
+      return Promise.resolve(viewSlot.removeAll(true)).then(callback);
+    }
+  };
+
   function tryActivateViewModel(context) {
     if (context.skipActivation || typeof context.viewModel.activate !== 'function') {
       return Promise.resolve();
@@ -12866,38 +12974,45 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
       this.viewLocator = viewLocator;
     }
 
-    CompositionEngine.prototype._createControllerAndSwap = function _createControllerAndSwap(context) {
-      function swap(controller) {
-        return Promise.resolve(context.viewSlot.removeAll(true)).then(function () {
+    CompositionEngine.prototype._swap = function _swap(context, view) {
+      var swapStrategy = SwapStrategies[context.swapOrder] || SwapStrategies.after;
+      var previousViews = context.viewSlot.children.slice();
+
+      return swapStrategy(context.viewSlot, previousViews, function () {
+        return Promise.resolve(context.viewSlot.add(view)).then(function () {
           if (context.currentController) {
             context.currentController.unbind();
           }
-
-          context.viewSlot.add(controller.view);
-
-          if (context.compositionTransactionNotifier) {
-            context.compositionTransactionNotifier.done();
-          }
-
-          return controller;
         });
-      }
+      }).then(function () {
+        if (context.compositionTransactionNotifier) {
+          context.compositionTransactionNotifier.done();
+        }
+      });
+    };
+
+    CompositionEngine.prototype._createControllerAndSwap = function _createControllerAndSwap(context) {
+      var _this14 = this;
 
       return this.createController(context).then(function (controller) {
         controller.automate(context.overrideContext, context.owningView);
 
         if (context.compositionTransactionOwnershipToken) {
           return context.compositionTransactionOwnershipToken.waitForCompositionComplete().then(function () {
-            return swap(controller);
+            return _this14._swap(context, controller.view);
+          }).then(function () {
+            return controller;
           });
         }
 
-        return swap(controller);
+        return _this14._swap(context, controller.view).then(function () {
+          return controller;
+        });
       });
     };
 
     CompositionEngine.prototype.createController = function createController(context) {
-      var _this14 = this;
+      var _this15 = this;
 
       var childContainer = void 0;
       var viewModel = void 0;
@@ -12910,7 +13025,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
         viewModelResource = context.viewModelResource;
         m = viewModelResource.metadata;
 
-        var viewStrategy = _this14.viewLocator.getViewStrategy(context.view || viewModel);
+        var viewStrategy = _this15.viewLocator.getViewStrategy(context.view || viewModel);
 
         if (context.viewResources) {
           viewStrategy.makeRelativeTo(context.viewResources.viewUrl);
@@ -12950,6 +13065,8 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     CompositionEngine.prototype.compose = function compose(context) {
+      var _this16 = this;
+
       context.childContainer = context.childContainer || context.container.createChild();
       context.view = this.viewLocator.getViewStrategy(context.view);
 
@@ -12973,23 +13090,17 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
           var result = viewFactory.create(context.childContainer);
           result.bind(context.bindingContext, context.overrideContext);
 
-          var work = function work() {
-            return Promise.resolve(context.viewSlot.removeAll(true)).then(function () {
-              context.viewSlot.add(result);
-
-              if (context.compositionTransactionNotifier) {
-                context.compositionTransactionNotifier.done();
-              }
-
+          if (context.compositionTransactionOwnershipToken) {
+            return context.compositionTransactionOwnershipToken.waitForCompositionComplete().then(function () {
+              return _this16._swap(context, result);
+            }).then(function () {
               return result;
             });
-          };
-
-          if (context.compositionTransactionOwnershipToken) {
-            return context.compositionTransactionOwnershipToken.waitForCompositionComplete().then(work);
           }
 
-          return work();
+          return _this16._swap(context, result).then(function () {
+            return result;
+          });
         });
       } else if (context.viewSlot) {
         context.viewSlot.removeAll();
@@ -13388,14 +13499,12 @@ define('aurelia-framework',['exports', 'aurelia-dependency-injection', 'aurelia-
     Aurelia.prototype.start = function start() {
       var _this = this;
 
-      if (this.started) {
-        return Promise.resolve(this);
+      if (this._started) {
+        return this._started;
       }
 
-      this.started = true;
       this.logger.info('Aurelia Starting');
-
-      return this.use.apply().then(function () {
+      return this._started = this.use.apply().then(function () {
         preventActionlessFormSubmit();
 
         if (!_this.container.hasResolver(_aureliaTemplating.BindingLanguage)) {
@@ -13660,12 +13769,13 @@ define('aurelia-framework',['exports', 'aurelia-dependency-injection', 'aurelia-
       return this;
     };
 
-    FrameworkConfiguration.prototype.feature = function feature(plugin, config) {
-      if (getExt(plugin)) {
-        return this.plugin({ moduleId: plugin, resourcesRelativeTo: [plugin, ''], config: config || {} });
-      }
+    FrameworkConfiguration.prototype.feature = function feature(plugin) {
+      var config = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
 
-      return this.plugin({ moduleId: plugin + '/index', resourcesRelativeTo: [plugin, ''], config: config || {} });
+      var hasIndex = /\/index$/i.test(plugin);
+      var moduleId = hasIndex || getExt(plugin) ? plugin : plugin + '/index';
+      var root = hasIndex ? plugin.substr(0, plugin.length - 6) : plugin;
+      return this.plugin({ moduleId: moduleId, resourcesRelativeTo: [root, ''], config: config });
     };
 
     FrameworkConfiguration.prototype.globalResources = function globalResources(resources) {
@@ -14403,7 +14513,9 @@ define('aurelia-loader-default',['exports', 'aurelia-loader', 'aurelia-pal', 'au
     };
 
     DefaultLoader.prototype.map = function (id, source) {
-      System.map[id] = source;
+      var _map;
+
+      System.config({ map: (_map = {}, _map[id] = source, _map) });
     };
 
     DefaultLoader.prototype.normalizeSync = function (moduleId, relativeTo) {
@@ -15814,23 +15926,36 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     NavigationInstruction.prototype.getBaseUrl = function getBaseUrl() {
+      var _this = this;
+
+      var fragment = this.fragment;
+
+      if (fragment === '') {
+        var nonEmptyRoute = this.router.routes.find(function (route) {
+          return route.name === _this.config.name && route.route !== '';
+        });
+        if (nonEmptyRoute) {
+          fragment = nonEmptyRoute.route;
+        }
+      }
+
       if (!this.params) {
-        return this.fragment;
+        return fragment;
       }
 
       var wildcardName = this.getWildCardName();
       var path = this.params[wildcardName] || '';
 
       if (!path) {
-        return this.fragment;
+        return fragment;
       }
 
       path = encodeURI(path);
-      return this.fragment.substr(0, this.fragment.lastIndexOf(path));
+      return fragment.substr(0, fragment.lastIndexOf(path));
     };
 
     NavigationInstruction.prototype._commitChanges = function _commitChanges(waitToSwap) {
-      var _this = this;
+      var _this2 = this;
 
       var router = this.router;
       router.currentInstruction = this;
@@ -15848,7 +15973,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       var delaySwaps = [];
 
       var _loop = function _loop(viewPortName) {
-        var viewPortInstruction = _this.viewPortInstructions[viewPortName];
+        var viewPortInstruction = _this2.viewPortInstructions[viewPortName];
         var viewPort = router.viewPorts[viewPortName];
 
         if (!viewPort) {
@@ -15884,7 +16009,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         });
         return null;
       }).then(function () {
-        return prune(_this);
+        return prune(_this2);
       });
     };
 
@@ -16292,7 +16417,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
 
   var Router = exports.Router = function () {
     function Router(container, history) {
-      var _this2 = this;
+      var _this3 = this;
 
       
 
@@ -16300,8 +16425,8 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       this.options = {};
 
       this.transformTitle = function (title) {
-        if (_this2.parent) {
-          return _this2.parent.transformTitle(title);
+        if (_this3.parent) {
+          return _this3.parent.transformTitle(title);
         }
         return title;
       };
@@ -16312,20 +16437,22 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     Router.prototype.reset = function reset() {
-      var _this3 = this;
+      var _this4 = this;
 
       this.viewPorts = {};
       this.routes = [];
       this.baseUrl = '';
       this.isConfigured = false;
       this.isNavigating = false;
+      this.isExplicitNavigation = false;
+      this.isExplicitNavigationBack = false;
       this.navigation = [];
       this.currentInstruction = null;
       this._fallbackOrder = 100;
       this._recognizer = new _aureliaRouteRecognizer.RouteRecognizer();
       this._childRecognizer = new _aureliaRouteRecognizer.RouteRecognizer();
       this._configuredPromise = new Promise(function (resolve) {
-        _this3._resolveConfiguredPromise = resolve;
+        _this4._resolveConfiguredPromise = resolve;
       });
     };
 
@@ -16339,7 +16466,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype.configure = function configure(callbackOrConfig) {
-      var _this4 = this;
+      var _this5 = this;
 
       this.isConfigured = true;
 
@@ -16355,9 +16482,9 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
           config = c;
         }
 
-        config.exportToRouter(_this4);
-        _this4.isConfigured = true;
-        _this4._resolveConfiguredPromise();
+        config.exportToRouter(_this5);
+        _this5.isConfigured = true;
+        _this5._resolveConfiguredPromise();
       });
     };
 
@@ -16366,6 +16493,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         return this.parent.navigate(fragment, options);
       }
 
+      this.isExplicitNavigation = true;
       return this.history.navigate(_resolveUrl(fragment, this.baseUrl, this.history._hasPushState), options);
     };
 
@@ -16375,6 +16503,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype.navigateBack = function navigateBack() {
+      this.isExplicitNavigationBack = true;
       this.history.navigateBack();
     };
 
@@ -16482,14 +16611,14 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype.handleUnknownRoutes = function handleUnknownRoutes(config) {
-      var _this5 = this;
+      var _this6 = this;
 
       if (!config) {
         throw new Error('Invalid unknown route handler');
       }
 
       this.catchAllHandler = function (instruction) {
-        return _this5._createRouteConfig(config, instruction).then(function (c) {
+        return _this6._createRouteConfig(config, instruction).then(function (c) {
           instruction.config = c;
           return instruction;
         });
@@ -16585,7 +16714,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     Router.prototype._createRouteConfig = function _createRouteConfig(config, instruction) {
-      var _this6 = this;
+      var _this7 = this;
 
       return Promise.resolve(config).then(function (c) {
         if (typeof c === 'string') {
@@ -16599,10 +16728,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         return typeof c === 'string' ? { moduleId: c } : c;
       }).then(function (c) {
         c.route = instruction.params.path;
-        validateRouteConfig(c, _this6.routes);
+        validateRouteConfig(c, _this7.routes);
 
         if (!c.navModel) {
-          c.navModel = _this6.createNavModel(c);
+          c.navModel = _this7.createNavModel(c);
         }
 
         return c;
@@ -17065,10 +17194,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     PipelineSlot.prototype.getSteps = function getSteps() {
-      var _this7 = this;
+      var _this8 = this;
 
       return this.steps.map(function (x) {
-        return _this7.container.get(x);
+        return _this8.container.get(x);
       });
     };
 
@@ -17088,11 +17217,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     PipelineProvider.prototype.createPipeline = function createPipeline() {
-      var _this8 = this;
+      var _this9 = this;
 
       var pipeline = new Pipeline();
       this.steps.forEach(function (step) {
-        return pipeline.addStep(_this8.container.get(step));
+        return pipeline.addStep(_this9.container.get(step));
       });
       return pipeline;
     };
@@ -17156,11 +17285,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     function AppRouter(container, history, pipelineProvider, events) {
       
 
-      var _this9 = _possibleConstructorReturn(this, _Router.call(this, container, history));
+      var _this10 = _possibleConstructorReturn(this, _Router.call(this, container, history));
 
-      _this9.pipelineProvider = pipelineProvider;
-      _this9.events = events;
-      return _this9;
+      _this10.pipelineProvider = pipelineProvider;
+      _this10.events = events;
+      return _this10;
     }
 
     AppRouter.prototype.reset = function reset() {
@@ -17174,35 +17303,35 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     AppRouter.prototype.loadUrl = function loadUrl(url) {
-      var _this10 = this;
+      var _this11 = this;
 
       return this._createNavigationInstruction(url).then(function (instruction) {
-        return _this10._queueInstruction(instruction);
+        return _this11._queueInstruction(instruction);
       }).catch(function (error) {
         logger.error(error);
-        restorePreviousLocation(_this10);
+        restorePreviousLocation(_this11);
       });
     };
 
     AppRouter.prototype.registerViewPort = function registerViewPort(viewPort, name) {
-      var _this11 = this;
+      var _this12 = this;
 
       _Router.prototype.registerViewPort.call(this, viewPort, name);
 
       if (!this.isActive) {
         var _ret6 = function () {
-          var viewModel = _this11._findViewModel(viewPort);
+          var viewModel = _this12._findViewModel(viewPort);
           if ('configureRouter' in viewModel) {
-            if (!_this11.isConfigured) {
+            if (!_this12.isConfigured) {
               var _ret7 = function () {
-                var resolveConfiguredPromise = _this11._resolveConfiguredPromise;
-                _this11._resolveConfiguredPromise = function () {};
+                var resolveConfiguredPromise = _this12._resolveConfiguredPromise;
+                _this12._resolveConfiguredPromise = function () {};
                 return {
                   v: {
-                    v: _this11.configure(function (config) {
-                      return viewModel.configureRouter(config, _this11);
+                    v: _this12.configure(function (config) {
+                      return viewModel.configureRouter(config, _this12);
                     }).then(function () {
-                      _this11.activate();
+                      _this12.activate();
                       resolveConfiguredPromise();
                     })
                   }
@@ -17212,7 +17341,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
               if ((typeof _ret7 === 'undefined' ? 'undefined' : _typeof(_ret7)) === "object") return _ret7.v;
             }
           } else {
-            _this11.activate();
+            _this12.activate();
           }
         }();
 
@@ -17241,53 +17370,53 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     };
 
     AppRouter.prototype._queueInstruction = function _queueInstruction(instruction) {
-      var _this12 = this;
+      var _this13 = this;
 
       return new Promise(function (resolve) {
         instruction.resolve = resolve;
-        _this12._queue.unshift(instruction);
-        _this12._dequeueInstruction();
+        _this13._queue.unshift(instruction);
+        _this13._dequeueInstruction();
       });
     };
 
     AppRouter.prototype._dequeueInstruction = function _dequeueInstruction() {
-      var _this13 = this;
+      var _this14 = this;
 
       var instructionCount = arguments.length <= 0 || arguments[0] === undefined ? 0 : arguments[0];
 
       return Promise.resolve().then(function () {
-        if (_this13.isNavigating && !instructionCount) {
+        if (_this14.isNavigating && !instructionCount) {
           return undefined;
         }
 
-        var instruction = _this13._queue.shift();
-        _this13._queue.length = 0;
+        var instruction = _this14._queue.shift();
+        _this14._queue.length = 0;
 
         if (!instruction) {
           return undefined;
         }
 
-        _this13.isNavigating = true;
-        instruction.previousInstruction = _this13.currentInstruction;
+        _this14.isNavigating = true;
+        instruction.previousInstruction = _this14.currentInstruction;
 
         if (!instructionCount) {
-          _this13.events.publish('router:navigation:processing', { instruction: instruction });
-        } else if (instructionCount === _this13.maxInstructionCount - 1) {
+          _this14.events.publish('router:navigation:processing', { instruction: instruction });
+        } else if (instructionCount === _this14.maxInstructionCount - 1) {
           logger.error(instructionCount + 1 + ' navigation instructions have been attempted without success. Restoring last known good location.');
-          restorePreviousLocation(_this13);
-          return _this13._dequeueInstruction(instructionCount + 1);
-        } else if (instructionCount > _this13.maxInstructionCount) {
+          restorePreviousLocation(_this14);
+          return _this14._dequeueInstruction(instructionCount + 1);
+        } else if (instructionCount > _this14.maxInstructionCount) {
           throw new Error('Maximum navigation attempts exceeded. Giving up.');
         }
 
-        var pipeline = _this13.pipelineProvider.createPipeline();
+        var pipeline = _this14.pipelineProvider.createPipeline();
 
         return pipeline.run(instruction).then(function (result) {
-          return processResult(instruction, result, instructionCount, _this13);
+          return processResult(instruction, result, instructionCount, _this14);
         }).catch(function (error) {
           return { output: error instanceof Error ? error : new Error(error) };
         }).then(function (result) {
-          return resolveInstruction(instruction, result, !!instructionCount, _this13);
+          return resolveInstruction(instruction, result, !!instructionCount, _this14);
         });
       });
     };
@@ -17345,9 +17474,12 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
   function resolveInstruction(instruction, result, isInnerInstruction, router) {
     instruction.resolve(result);
 
+    var eventArgs = { instruction: instruction, result: result };
     if (!isInnerInstruction) {
       router.isNavigating = false;
-      var eventArgs = { instruction: instruction, result: result };
+      router.isExplicitNavigation = false;
+      router.isExplicitNavigationBack = false;
+
       var eventName = void 0;
 
       if (result.output instanceof Error) {
@@ -17362,6 +17494,8 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
 
       router.events.publish('router:navigation:' + eventName, eventArgs);
       router.events.publish('router:navigation:complete', eventArgs);
+    } else {
+      router.events.publish('router:navigation:child:complete', eventArgs);
     }
 
     return result;
@@ -17453,6 +17587,8 @@ define('aurelia-templating-binding',['exports', 'aurelia-logging', 'aurelia-bind
       this.registerUniversal('readonly', 'readOnly');
 
       this.register('label', 'for', 'htmlFor');
+
+      this.register('img', 'usemap', 'useMap');
 
       this.register('input', 'maxlength', 'maxLength');
       this.register('input', 'minlength', 'minLength');
@@ -18065,86 +18201,13 @@ define('aurelia-templating-binding',['exports', 'aurelia-logging', 'aurelia-bind
     config.container.registerAlias(_aureliaTemplating.BindingLanguage, TemplatingBindingLanguage);
   }
 });
-define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-injection', 'aurelia-templating', 'aurelia-router', 'aurelia-path', 'aurelia-metadata'], function (exports, _aureliaDependencyInjection, _aureliaTemplating, _aureliaRouter, _aureliaPath, _aureliaMetadata) {
-  'use strict';
-
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports.TemplatingRouteLoader = undefined;
-
-  
-
-  function _possibleConstructorReturn(self, call) {
-    if (!self) {
-      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
-    }
-
-    return call && (typeof call === "object" || typeof call === "function") ? call : self;
-  }
-
-  function _inherits(subClass, superClass) {
-    if (typeof superClass !== "function" && superClass !== null) {
-      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
-    }
-
-    subClass.prototype = Object.create(superClass && superClass.prototype, {
-      constructor: {
-        value: subClass,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
-    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
-  }
-
-  var _dec, _class;
-
-  var TemplatingRouteLoader = exports.TemplatingRouteLoader = (_dec = (0, _aureliaDependencyInjection.inject)(_aureliaTemplating.CompositionEngine), _dec(_class = function (_RouteLoader) {
-    _inherits(TemplatingRouteLoader, _RouteLoader);
-
-    function TemplatingRouteLoader(compositionEngine) {
-      
-
-      var _this = _possibleConstructorReturn(this, _RouteLoader.call(this));
-
-      _this.compositionEngine = compositionEngine;
-      return _this;
-    }
-
-    TemplatingRouteLoader.prototype.loadRoute = function loadRoute(router, config) {
-      var childContainer = router.container.createChild();
-      var instruction = {
-        viewModel: (0, _aureliaPath.relativeToFile)(config.moduleId, _aureliaMetadata.Origin.get(router.container.viewModel.constructor).moduleId),
-        childContainer: childContainer,
-        view: config.view || config.viewStrategy,
-        router: router
-      };
-
-      childContainer.getChildRouter = function () {
-        var childRouter = void 0;
-
-        childContainer.registerHandler(_aureliaRouter.Router, function (c) {
-          return childRouter || (childRouter = router.createChild(childContainer));
-        });
-
-        return childContainer.get(_aureliaRouter.Router);
-      };
-
-      return this.compositionEngine.ensureViewModel(instruction);
-    };
-
-    return TemplatingRouteLoader;
-  }(_aureliaRouter.RouteLoader)) || _class);
-});
 define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-injection', 'aurelia-binding', 'aurelia-templating', 'aurelia-router', 'aurelia-metadata', 'aurelia-pal'], function (exports, _aureliaDependencyInjection, _aureliaBinding, _aureliaTemplating, _aureliaRouter, _aureliaMetadata, _aureliaPal) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.RouterView = undefined;
+  exports.RouterViewLocator = exports.RouterView = undefined;
 
   function _initDefineProp(target, property, descriptor, context) {
     if (!descriptor) return;
@@ -18155,6 +18218,8 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
       value: descriptor.initializer ? descriptor.initializer.call(context) : void 0
     });
   }
+
+  
 
   function _applyDecoratedDescriptor(target, property, decorators, descriptor, context) {
     var desc = {};
@@ -18190,44 +18255,6 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
   }
 
   var _dec, _dec2, _class, _desc, _value, _class2, _descriptor, _descriptor2, _descriptor3, _descriptor4;
-
-  
-
-  var SwapStrategies = function () {
-    function SwapStrategies() {
-      
-    }
-
-    SwapStrategies.prototype.before = function before(viewSlot, previousView, callback) {
-      var promise = Promise.resolve(callback());
-
-      if (previousView !== undefined) {
-        return promise.then(function () {
-          return viewSlot.remove(previousView, true);
-        });
-      }
-
-      return promise;
-    };
-
-    SwapStrategies.prototype.with = function _with(viewSlot, previousView, callback) {
-      var promise = Promise.resolve(callback());
-
-      if (previousView !== undefined) {
-        return Promise.all([viewSlot.remove(previousView, true), promise]);
-      }
-
-      return promise;
-    };
-
-    SwapStrategies.prototype.after = function after(viewSlot, previousView, callback) {
-      return Promise.resolve(viewSlot.removeAll(true)).then(callback);
-    };
-
-    return SwapStrategies;
-  }();
-
-  var swapStrategies = new SwapStrategies();
 
   var RouterView = exports.RouterView = (_dec = (0, _aureliaTemplating.customElement)('router-view'), _dec2 = (0, _aureliaDependencyInjection.inject)(_aureliaPal.DOM.Element, _aureliaDependencyInjection.Container, _aureliaTemplating.ViewSlot, _aureliaRouter.Router, _aureliaTemplating.ViewLocator, _aureliaTemplating.CompositionTransaction, _aureliaTemplating.CompositionEngine), _dec(_class = (0, _aureliaTemplating.noView)(_class = _dec2(_class = (_class2 = function () {
     function RouterView(element, container, viewSlot, router, viewLocator, compositionTransaction, compositionEngine) {
@@ -18276,6 +18303,8 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
       var config = component.router.currentInstruction.config;
       var viewPort = config.viewPorts ? config.viewPorts[viewPortInstruction.name] : {};
 
+      childContainer.get(RouterViewLocator)._notify(this);
+
       var layoutInstruction = {
         viewModel: viewPort.layoutViewModel || config.layoutViewModel || this.layoutViewModel,
         view: viewPort.layoutView || config.layoutView || this.layoutView,
@@ -18313,20 +18342,16 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
       var _this2 = this;
 
       var layoutInstruction = viewPortInstruction.layoutInstruction;
+      var previousView = this.view;
 
       var work = function work() {
-        var previousView = _this2.view;
-        var swapStrategy = void 0;
+        var swapStrategy = _aureliaTemplating.SwapStrategies[_this2.swapOrder] || _aureliaTemplating.SwapStrategies.after;
         var viewSlot = _this2.viewSlot;
 
-        swapStrategy = _this2.swapOrder in swapStrategies ? swapStrategies[_this2.swapOrder] : swapStrategies.after;
-
         swapStrategy(viewSlot, previousView, function () {
-          return Promise.resolve().then(function () {
-            return viewSlot.add(_this2.view);
-          }).then(function () {
-            _this2._notify();
-          });
+          return Promise.resolve(viewSlot.add(_this2.view));
+        }).then(function () {
+          _this2._notify();
         });
       };
 
@@ -18384,6 +18409,128 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
     enumerable: true,
     initializer: null
   })), _class2)) || _class) || _class) || _class);
+
+  var RouterViewLocator = exports.RouterViewLocator = function () {
+    function RouterViewLocator() {
+      var _this3 = this;
+
+      
+
+      this.promise = new Promise(function (resolve) {
+        return _this3.resolve = resolve;
+      });
+    }
+
+    RouterViewLocator.prototype.findNearest = function findNearest() {
+      return this.promise;
+    };
+
+    RouterViewLocator.prototype._notify = function _notify(routerView) {
+      this.resolve(routerView);
+    };
+
+    return RouterViewLocator;
+  }();
+});
+define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-injection', 'aurelia-templating', 'aurelia-router', 'aurelia-path', 'aurelia-metadata', './router-view'], function (exports, _aureliaDependencyInjection, _aureliaTemplating, _aureliaRouter, _aureliaPath, _aureliaMetadata, _routerView) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.TemplatingRouteLoader = undefined;
+
+  
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  var _dec, _class;
+
+  var TemplatingRouteLoader = exports.TemplatingRouteLoader = (_dec = (0, _aureliaDependencyInjection.inject)(_aureliaTemplating.CompositionEngine), _dec(_class = function (_RouteLoader) {
+    _inherits(TemplatingRouteLoader, _RouteLoader);
+
+    function TemplatingRouteLoader(compositionEngine) {
+      
+
+      var _this = _possibleConstructorReturn(this, _RouteLoader.call(this));
+
+      _this.compositionEngine = compositionEngine;
+      return _this;
+    }
+
+    TemplatingRouteLoader.prototype.loadRoute = function loadRoute(router, config) {
+      var childContainer = router.container.createChild();
+
+      var viewModel = /\.html/.test(config.moduleId) ? createDynamicClass(config.moduleId) : (0, _aureliaPath.relativeToFile)(config.moduleId, _aureliaMetadata.Origin.get(router.container.viewModel.constructor).moduleId);
+
+      var instruction = {
+        viewModel: viewModel,
+        childContainer: childContainer,
+        view: config.view || config.viewStrategy,
+        router: router
+      };
+
+      childContainer.registerSingleton(_routerView.RouterViewLocator);
+
+      childContainer.getChildRouter = function () {
+        var childRouter = void 0;
+
+        childContainer.registerHandler(_aureliaRouter.Router, function (c) {
+          return childRouter || (childRouter = router.createChild(childContainer));
+        });
+
+        return childContainer.get(_aureliaRouter.Router);
+      };
+
+      return this.compositionEngine.ensureViewModel(instruction);
+    };
+
+    return TemplatingRouteLoader;
+  }(_aureliaRouter.RouteLoader)) || _class);
+
+
+  function createDynamicClass(moduleId) {
+    var _dec2, _dec3, _class2;
+
+    var name = /([^\/^\?]+)\.html/i.exec(moduleId)[1];
+
+    var DynamicClass = (_dec2 = (0, _aureliaTemplating.customElement)(name), _dec3 = (0, _aureliaTemplating.useView)(moduleId), _dec2(_class2 = _dec3(_class2 = function () {
+      function DynamicClass() {
+        
+      }
+
+      DynamicClass.prototype.bind = function bind(bindingContext) {
+        this.$parent = bindingContext;
+      };
+
+      return DynamicClass;
+    }()) || _class2) || _class2);
+
+
+    return DynamicClass;
+  }
 });
 define('aurelia-templating-router/route-href',['exports', 'aurelia-templating', 'aurelia-dependency-injection', 'aurelia-router', 'aurelia-pal', 'aurelia-logging'], function (exports, _aureliaTemplating, _aureliaDependencyInjection, _aureliaRouter, _aureliaPal, _aureliaLogging) {
   'use strict';
@@ -18468,7 +18615,7 @@ define('aurelia-templating-router/route-href',['exports', 'aurelia-templating', 
     return RouteHref;
   }()) || _class) || _class) || _class) || _class) || _class);
 });
-define('aurelia-templating-router/aurelia-templating-router',['exports', 'aurelia-router', './route-loader', './router-view', './route-href'], function (exports, _aureliaRouter, _routeLoader, _routerView, _routeHref) {
+define('aurelia-templating-router/aurelia-templating-router',['exports', 'aurelia-pal', 'aurelia-router', './route-loader', './router-view', './route-href'], function (exports, _aureliaPal, _aureliaRouter, _routeLoader, _routerView, _routeHref) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
@@ -18478,7 +18625,7 @@ define('aurelia-templating-router/aurelia-templating-router',['exports', 'aureli
 
 
   function configure(config) {
-    config.singleton(_aureliaRouter.RouteLoader, _routeLoader.TemplatingRouteLoader).singleton(_aureliaRouter.Router, _aureliaRouter.AppRouter).globalResources('./router-view', './route-href');
+    config.singleton(_aureliaRouter.RouteLoader, _routeLoader.TemplatingRouteLoader).singleton(_aureliaRouter.Router, _aureliaRouter.AppRouter).globalResources(_aureliaPal.PLATFORM.moduleName('./router-view'), _aureliaPal.PLATFORM.moduleName('./route-href'));
 
     config.container.registerAlias(_aureliaRouter.Router, _aureliaRouter.AppRouter);
   }
@@ -18543,7 +18690,7 @@ define('aurelia-templating-resources/compose',['exports', 'aurelia-dependency-in
     throw new Error('Decorating class property failed. Please ensure that transform-class-properties is enabled.');
   }
 
-  var _dec, _dec2, _class, _desc, _value, _class2, _descriptor, _descriptor2, _descriptor3;
+  var _dec, _dec2, _class, _desc, _value, _class2, _descriptor, _descriptor2, _descriptor3, _descriptor4;
 
   var Compose = exports.Compose = (_dec = (0, _aureliaTemplating.customElement)('compose'), _dec2 = (0, _aureliaDependencyInjection.inject)(_aureliaPal.DOM.Element, _aureliaDependencyInjection.Container, _aureliaTemplating.CompositionEngine, _aureliaTemplating.ViewSlot, _aureliaTemplating.ViewResources, _aureliaTaskQueue.TaskQueue), _dec(_class = (0, _aureliaTemplating.noView)(_class = _dec2(_class = (_class2 = function () {
     function Compose(element, container, compositionEngine, viewSlot, viewResources, taskQueue) {
@@ -18554,6 +18701,8 @@ define('aurelia-templating-resources/compose',['exports', 'aurelia-dependency-in
       _initDefineProp(this, 'view', _descriptor2, this);
 
       _initDefineProp(this, 'viewModel', _descriptor3, this);
+
+      _initDefineProp(this, 'swapOrder', _descriptor4, this);
 
       this.element = element;
       this.container = container;
@@ -18659,6 +18808,9 @@ define('aurelia-templating-resources/compose',['exports', 'aurelia-dependency-in
   }), _descriptor3 = _applyDecoratedDescriptor(_class2.prototype, 'viewModel', [_aureliaTemplating.bindable], {
     enumerable: true,
     initializer: null
+  }), _descriptor4 = _applyDecoratedDescriptor(_class2.prototype, 'swapOrder', [_aureliaTemplating.bindable], {
+    enumerable: true,
+    initializer: null
   })), _class2)) || _class) || _class) || _class);
 
 
@@ -18671,7 +18823,8 @@ define('aurelia-templating-resources/compose',['exports', 'aurelia-dependency-in
       viewSlot: composer.viewSlot,
       viewResources: composer.viewResources,
       currentController: composer.currentController,
-      host: composer.element
+      host: composer.element,
+      swapOrder: composer.swapOrder
     });
   }
 
@@ -20588,6 +20741,44 @@ define('aurelia-templating-resources/debounce-binding-behavior',['exports', 'aur
     return DebounceBindingBehavior;
   }();
 });
+define('aurelia-templating-resources/self-binding-behavior',['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  
+
+  function findOriginalEventTarget(event) {
+    return event.path && event.path[0] || event.deepPath && event.deepPath[0] || event.target;
+  }
+
+  function handleSelfEvent(event) {
+    var target = findOriginalEventTarget(event);
+    if (this.target !== target) return;
+    this.selfEventCallSource(event);
+  }
+
+  var SelfBindingBehavior = exports.SelfBindingBehavior = function () {
+    function SelfBindingBehavior() {
+      
+    }
+
+    SelfBindingBehavior.prototype.bind = function bind(binding, source) {
+      if (!binding.callSource || !binding.targetEvent) throw new Error('Self binding behavior only supports event.');
+      binding.selfEventCallSource = binding.callSource;
+      binding.callSource = handleSelfEvent;
+    };
+
+    SelfBindingBehavior.prototype.unbind = function unbind(binding, source) {
+      binding.callSource = binding.selfEventCallSource;
+      binding.selfEventCallSource = null;
+    };
+
+    return SelfBindingBehavior;
+  }();
+});
 define('aurelia-templating-resources/binding-signaler',['exports', 'aurelia-binding'], function (exports, _aureliaBinding) {
   'use strict';
 
@@ -20808,19 +20999,19 @@ define('aurelia-templating-resources/html-resource-plugin',['exports', 'aurelia-
     });
   }
 });
-define('aurelia-templating-resources/aurelia-templating-resources',['exports', './compose', './if', './with', './repeat', './show', './hide', './sanitize-html', './replaceable', './focus', 'aurelia-templating', './css-resource', './html-sanitizer', './attr-binding-behavior', './binding-mode-behaviors', './throttle-binding-behavior', './debounce-binding-behavior', './signal-binding-behavior', './binding-signaler', './update-trigger-binding-behavior', './abstract-repeater', './repeat-strategy-locator', './html-resource-plugin', './null-repeat-strategy', './array-repeat-strategy', './map-repeat-strategy', './set-repeat-strategy', './number-repeat-strategy', './repeat-utilities', './analyze-view-factory', './aurelia-hide-style'], function (exports, _compose, _if, _with, _repeat, _show, _hide, _sanitizeHtml, _replaceable, _focus, _aureliaTemplating, _cssResource, _htmlSanitizer, _attrBindingBehavior, _bindingModeBehaviors, _throttleBindingBehavior, _debounceBindingBehavior, _signalBindingBehavior, _bindingSignaler, _updateTriggerBindingBehavior, _abstractRepeater, _repeatStrategyLocator, _htmlResourcePlugin, _nullRepeatStrategy, _arrayRepeatStrategy, _mapRepeatStrategy, _setRepeatStrategy, _numberRepeatStrategy, _repeatUtilities, _analyzeViewFactory, _aureliaHideStyle) {
+define('aurelia-templating-resources/aurelia-templating-resources',['exports', 'aurelia-pal', './compose', './if', './with', './repeat', './show', './hide', './sanitize-html', './replaceable', './focus', 'aurelia-templating', './css-resource', './html-sanitizer', './attr-binding-behavior', './binding-mode-behaviors', './throttle-binding-behavior', './debounce-binding-behavior', './self-binding-behavior', './signal-binding-behavior', './binding-signaler', './update-trigger-binding-behavior', './abstract-repeater', './repeat-strategy-locator', './html-resource-plugin', './null-repeat-strategy', './array-repeat-strategy', './map-repeat-strategy', './set-repeat-strategy', './number-repeat-strategy', './repeat-utilities', './analyze-view-factory', './aurelia-hide-style'], function (exports, _aureliaPal, _compose, _if, _with, _repeat, _show, _hide, _sanitizeHtml, _replaceable, _focus, _aureliaTemplating, _cssResource, _htmlSanitizer, _attrBindingBehavior, _bindingModeBehaviors, _throttleBindingBehavior, _debounceBindingBehavior, _selfBindingBehavior, _signalBindingBehavior, _bindingSignaler, _updateTriggerBindingBehavior, _abstractRepeater, _repeatStrategyLocator, _htmlResourcePlugin, _nullRepeatStrategy, _arrayRepeatStrategy, _mapRepeatStrategy, _setRepeatStrategy, _numberRepeatStrategy, _repeatUtilities, _analyzeViewFactory, _aureliaHideStyle) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.viewsRequireLifecycle = exports.unwrapExpression = exports.updateOneTimeBinding = exports.isOneTime = exports.getItemsSourceExpression = exports.updateOverrideContext = exports.createFullOverrideContext = exports.NumberRepeatStrategy = exports.SetRepeatStrategy = exports.MapRepeatStrategy = exports.ArrayRepeatStrategy = exports.NullRepeatStrategy = exports.RepeatStrategyLocator = exports.AbstractRepeater = exports.UpdateTriggerBindingBehavior = exports.BindingSignaler = exports.SignalBindingBehavior = exports.DebounceBindingBehavior = exports.ThrottleBindingBehavior = exports.TwoWayBindingBehavior = exports.OneWayBindingBehavior = exports.OneTimeBindingBehavior = exports.AttrBindingBehavior = exports.configure = exports.Focus = exports.Replaceable = exports.SanitizeHTMLValueConverter = exports.HTMLSanitizer = exports.Hide = exports.Show = exports.Repeat = exports.With = exports.If = exports.Compose = undefined;
+  exports.viewsRequireLifecycle = exports.unwrapExpression = exports.updateOneTimeBinding = exports.isOneTime = exports.getItemsSourceExpression = exports.updateOverrideContext = exports.createFullOverrideContext = exports.NumberRepeatStrategy = exports.SetRepeatStrategy = exports.MapRepeatStrategy = exports.ArrayRepeatStrategy = exports.NullRepeatStrategy = exports.RepeatStrategyLocator = exports.AbstractRepeater = exports.UpdateTriggerBindingBehavior = exports.BindingSignaler = exports.SignalBindingBehavior = exports.SelfBindingBehavior = exports.DebounceBindingBehavior = exports.ThrottleBindingBehavior = exports.TwoWayBindingBehavior = exports.OneWayBindingBehavior = exports.OneTimeBindingBehavior = exports.AttrBindingBehavior = exports.configure = exports.Focus = exports.Replaceable = exports.SanitizeHTMLValueConverter = exports.HTMLSanitizer = exports.Hide = exports.Show = exports.Repeat = exports.With = exports.If = exports.Compose = undefined;
 
 
   function configure(config) {
     (0, _aureliaHideStyle.injectAureliaHideStyleAtHead)();
 
-    config.globalResources('./compose', './if', './with', './repeat', './show', './hide', './replaceable', './sanitize-html', './focus', './binding-mode-behaviors', './throttle-binding-behavior', './debounce-binding-behavior', './signal-binding-behavior', './update-trigger-binding-behavior', './attr-binding-behavior');
+    config.globalResources(_aureliaPal.PLATFORM.moduleName('./compose'), _aureliaPal.PLATFORM.moduleName('./if'), _aureliaPal.PLATFORM.moduleName('./with'), _aureliaPal.PLATFORM.moduleName('./repeat'), _aureliaPal.PLATFORM.moduleName('./show'), _aureliaPal.PLATFORM.moduleName('./hide'), _aureliaPal.PLATFORM.moduleName('./replaceable'), _aureliaPal.PLATFORM.moduleName('./sanitize-html'), _aureliaPal.PLATFORM.moduleName('./focus'), _aureliaPal.PLATFORM.moduleName('./binding-mode-behaviors'), _aureliaPal.PLATFORM.moduleName('./self-binding-behavior'), _aureliaPal.PLATFORM.moduleName('./throttle-binding-behavior'), _aureliaPal.PLATFORM.moduleName('./debounce-binding-behavior'), _aureliaPal.PLATFORM.moduleName('./signal-binding-behavior'), _aureliaPal.PLATFORM.moduleName('./update-trigger-binding-behavior'), _aureliaPal.PLATFORM.moduleName('./attr-binding-behavior'));
 
     (0, _htmlResourcePlugin.configure)(config);
 
@@ -20851,6 +21042,7 @@ define('aurelia-templating-resources/aurelia-templating-resources',['exports', '
   exports.TwoWayBindingBehavior = _bindingModeBehaviors.TwoWayBindingBehavior;
   exports.ThrottleBindingBehavior = _throttleBindingBehavior.ThrottleBindingBehavior;
   exports.DebounceBindingBehavior = _debounceBindingBehavior.DebounceBindingBehavior;
+  exports.SelfBindingBehavior = _selfBindingBehavior.SelfBindingBehavior;
   exports.SignalBindingBehavior = _signalBindingBehavior.SignalBindingBehavior;
   exports.BindingSignaler = _bindingSignaler.BindingSignaler;
   exports.UpdateTriggerBindingBehavior = _updateTriggerBindingBehavior.UpdateTriggerBindingBehavior;
@@ -20871,16 +21063,48 @@ define('aurelia-templating-resources/aurelia-templating-resources',['exports', '
 });
 define('aurelia-templating-resources', ['aurelia-templating-resources/aurelia-templating-resources'], function (main) { return main; });
 
+define('aurelia-validation/get-target-dom-element',["require", "exports", "aurelia-pal"], function (require, exports, aurelia_pal_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    /**
+     * Gets the DOM element associated with the data-binding. Most of the time it's
+     * the binding.target but sometimes binding.target is an aurelia custom element,
+     * or custom attribute which is a javascript "class" instance, so we need to use
+     * the controller's container to retrieve the actual DOM element.
+     */
+    function getTargetDOMElement(binding, view) {
+        var target = binding.target;
+        // DOM element
+        if (target instanceof Element) {
+            return target;
+        }
+        // custom element or custom attribute
+        // tslint:disable-next-line:prefer-const
+        for (var i = 0, ii = view.controllers.length; i < ii; i++) {
+            var controller = view.controllers[i];
+            if (controller.viewModel === target) {
+                var element = controller.container.get(aurelia_pal_1.DOM.Element);
+                if (element) {
+                    return element;
+                }
+                throw new Error("Unable to locate target element for \"" + binding.sourceExpression + "\".");
+            }
+        }
+        throw new Error("Unable to locate target element for \"" + binding.sourceExpression + "\".");
+    }
+    exports.getTargetDOMElement = getTargetDOMElement;
+});
+
 define('aurelia-validation/property-info',["require", "exports", "aurelia-binding"], function (require, exports, aurelia_binding_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     function getObject(expression, objectExpression, source) {
         var value = objectExpression.evaluate(source, null);
         if (value === null || value === undefined || value instanceof Object) {
             return value;
         }
-        /* tslint:disable */
+        // tslint:disable-next-line:max-line-length
         throw new Error("The '" + objectExpression + "' part of '" + expression + "' evaluates to " + value + " instead of an object, null or undefined.");
-        /* tslint:enable */
     }
     /**
      * Retrieves the object and property name for the specified expression.
@@ -20919,33 +21143,37 @@ define('aurelia-validation/property-info',["require", "exports", "aurelia-bindin
 
 define('aurelia-validation/validate-trigger',["require", "exports"], function (require, exports) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Validation triggers.
      */
-    exports.validateTrigger = {
+    var validateTrigger;
+    (function (validateTrigger) {
         /**
          * Manual validation.  Use the controller's `validate()` and  `reset()` methods
          * to validate all bindings.
          */
-        manual: 0,
+        validateTrigger[validateTrigger["manual"] = 0] = "manual";
         /**
          * Validate the binding when the binding's target element fires a DOM "blur" event.
          */
-        blur: 1,
+        validateTrigger[validateTrigger["blur"] = 1] = "blur";
         /**
          * Validate the binding when it updates the model due to a change in the view.
          */
-        change: 2,
+        validateTrigger[validateTrigger["change"] = 2] = "change";
         /**
          * Validate the binding when the binding's target element fires a DOM "blur" event and
          * when it updates the model due to a change in the view.
          */
-        changeOrBlur: 3
-    };
+        validateTrigger[validateTrigger["changeOrBlur"] = 3] = "changeOrBlur";
+    })(validateTrigger = exports.validateTrigger || (exports.validateTrigger = {}));
+    ;
 });
 
 define('aurelia-validation/validator',["require", "exports"], function (require, exports) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Validates objects and properties.
      */
@@ -20959,6 +21187,7 @@ define('aurelia-validation/validator',["require", "exports"], function (require,
 
 define('aurelia-validation/validate-result',["require", "exports"], function (require, exports) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * The result of validating an individual validation rule.
      */
@@ -20989,6 +21218,7 @@ define('aurelia-validation/validate-result',["require", "exports"], function (re
 
 define('aurelia-validation/validation-controller',["require", "exports", "./validator", "./validate-trigger", "./property-info", "./validate-result"], function (require, exports, validator_1, validate_trigger_1, property_info_1, validate_result_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Orchestrates validation.
      * Manages a set of bindings, renderers and objects.
@@ -21134,6 +21364,7 @@ define('aurelia-validation/validation-controller',["require", "exports", "./vali
             // Get a function that will process the validation instruction.
             var execute;
             if (instruction) {
+                // tslint:disable-next-line:prefer-const
                 var object_2 = instruction.object, propertyName_2 = instruction.propertyName, rules_2 = instruction.rules;
                 // if rules were not specified, check the object map.
                 rules_2 = rules_2 || this.objects.get(object_2);
@@ -21244,7 +21475,7 @@ define('aurelia-validation/validation-controller',["require", "exports", "./vali
                     }
                 }
                 else {
-                    // there is a corresponding new result...        
+                    // there is a corresponding new result...
                     var newResult = newResults.splice(newResultIndex, 1)[0];
                     // get the elements that are associated with the new result.
                     var elements_1 = this_1.getAssociatedElements(newResult);
@@ -21296,7 +21527,7 @@ define('aurelia-validation/validation-controller',["require", "exports", "./vali
                 return;
             }
             var propertyInfo = property_info_1.getPropertyInfo(binding.sourceExpression, binding.source);
-            var rules = undefined;
+            var rules;
             var registeredBinding = this.bindings.get(binding);
             if (registeredBinding) {
                 rules = registeredBinding.rules;
@@ -21332,8 +21563,9 @@ define('aurelia-validation/validation-controller',["require", "exports", "./vali
     exports.ValidationController = ValidationController;
 });
 
-define('aurelia-validation/validate-binding-behavior-base',["require", "exports", "aurelia-dependency-injection", "aurelia-pal", "./validation-controller", "./validate-trigger"], function (require, exports, aurelia_dependency_injection_1, aurelia_pal_1, validation_controller_1, validate_trigger_1) {
+define('aurelia-validation/validate-binding-behavior-base',["require", "exports", "aurelia-dependency-injection", "./validation-controller", "./validate-trigger", "./get-target-dom-element"], function (require, exports, aurelia_dependency_injection_1, validation_controller_1, validate_trigger_1, get_target_dom_element_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Binding behavior. Indicates the bound property should be validated.
      */
@@ -21341,35 +21573,10 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
         function ValidateBindingBehaviorBase(taskQueue) {
             this.taskQueue = taskQueue;
         }
-        /**
-         * Gets the DOM element associated with the data-binding. Most of the time it's
-         * the binding.target but sometimes binding.target is an aurelia custom element,
-         * or custom attribute which is a javascript "class" instance, so we need to use
-         * the controller's container to retrieve the actual DOM element.
-         */
-        ValidateBindingBehaviorBase.prototype.getTarget = function (binding, view) {
-            var target = binding.target;
-            // DOM element
-            if (target instanceof Element) {
-                return target;
-            }
-            // custom element or custom attribute
-            for (var i = 0, ii = view.controllers.length; i < ii; i++) {
-                var controller = view.controllers[i];
-                if (controller.viewModel === target) {
-                    var element = controller.container.get(aurelia_pal_1.DOM.Element);
-                    if (element) {
-                        return element;
-                    }
-                    throw new Error("Unable to locate target element for \"" + binding.sourceExpression + "\".");
-                }
-            }
-            throw new Error("Unable to locate target element for \"" + binding.sourceExpression + "\".");
-        };
         ValidateBindingBehaviorBase.prototype.bind = function (binding, source, rulesOrController, rules) {
             var _this = this;
             // identify the target element.
-            var target = this.getTarget(binding, source);
+            var target = get_target_dom_element_1.getTargetDOMElement(binding, source);
             // locate the controller.
             var controller;
             if (rulesOrController instanceof validation_controller_1.ValidationController) {
@@ -21385,20 +21592,17 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
             controller.registerBinding(binding, target, rules);
             binding.validationController = controller;
             var trigger = this.getValidateTrigger(controller);
-            /* tslint:disable:no-bitwise */
+            // tslint:disable-next-line:no-bitwise
             if (trigger & validate_trigger_1.validateTrigger.change) {
-                /* tslint:enable:no-bitwise */
                 binding.standardUpdateSource = binding.updateSource;
-                /* tslint:disable:only-arrow-functions */
+                // tslint:disable-next-line:only-arrow-functions
                 binding.updateSource = function (value) {
-                    /* tslint:enable:only-arrow-functions */
                     this.standardUpdateSource(value);
                     this.validationController.validateBinding(this);
                 };
             }
-            /* tslint:disable:no-bitwise */
+            // tslint:disable-next-line:no-bitwise
             if (trigger & validate_trigger_1.validateTrigger.blur) {
-                /* tslint:enable:no-bitwise */
                 binding.validateBlurHandler = function () {
                     _this.taskQueue.queueMicroTask(function () { return controller.validateBinding(binding); });
                 };
@@ -21407,9 +21611,8 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
             }
             if (trigger !== validate_trigger_1.validateTrigger.manual) {
                 binding.standardUpdateTarget = binding.updateTarget;
-                /* tslint:disable:only-arrow-functions */
+                // tslint:disable-next-line:only-arrow-functions
                 binding.updateTarget = function (value) {
-                    /* tslint:enable:only-arrow-functions */
                     this.standardUpdateTarget(value);
                     this.validationController.resetBinding(this);
                 };
@@ -21438,13 +21641,19 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
     exports.ValidateBindingBehaviorBase = ValidateBindingBehaviorBase;
 });
 
-var __extends = (this && this.__extends) || function (d, b) {
-    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
-    function __() { this.constructor = d; }
-    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
-};
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = Object.setPrototypeOf ||
+        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    return function (d, b) {
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
 define('aurelia-validation/validate-binding-behavior',["require", "exports", "aurelia-task-queue", "./validate-trigger", "./validate-binding-behavior-base"], function (require, exports, aurelia_task_queue_1, validate_trigger_1, validate_binding_behavior_base_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Binding behavior. Indicates the bound property should be validated
      * when the validate trigger specified by the associated controller's
@@ -21453,7 +21662,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
     var ValidateBindingBehavior = (function (_super) {
         __extends(ValidateBindingBehavior, _super);
         function ValidateBindingBehavior() {
-            return _super.apply(this, arguments) || this;
+            return _super !== null && _super.apply(this, arguments) || this;
         }
         ValidateBindingBehavior.prototype.getValidateTrigger = function (controller) {
             return controller.validateTrigger;
@@ -21470,7 +21679,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
     var ValidateManuallyBindingBehavior = (function (_super) {
         __extends(ValidateManuallyBindingBehavior, _super);
         function ValidateManuallyBindingBehavior() {
-            return _super.apply(this, arguments) || this;
+            return _super !== null && _super.apply(this, arguments) || this;
         }
         ValidateManuallyBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.manual;
@@ -21486,7 +21695,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
     var ValidateOnBlurBindingBehavior = (function (_super) {
         __extends(ValidateOnBlurBindingBehavior, _super);
         function ValidateOnBlurBindingBehavior() {
-            return _super.apply(this, arguments) || this;
+            return _super !== null && _super.apply(this, arguments) || this;
         }
         ValidateOnBlurBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.blur;
@@ -21503,7 +21712,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
     var ValidateOnChangeBindingBehavior = (function (_super) {
         __extends(ValidateOnChangeBindingBehavior, _super);
         function ValidateOnChangeBindingBehavior() {
-            return _super.apply(this, arguments) || this;
+            return _super !== null && _super.apply(this, arguments) || this;
         }
         ValidateOnChangeBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.change;
@@ -21520,7 +21729,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
     var ValidateOnChangeOrBlurBindingBehavior = (function (_super) {
         __extends(ValidateOnChangeOrBlurBindingBehavior, _super);
         function ValidateOnChangeOrBlurBindingBehavior() {
-            return _super.apply(this, arguments) || this;
+            return _super !== null && _super.apply(this, arguments) || this;
         }
         ValidateOnChangeOrBlurBindingBehavior.prototype.getValidateTrigger = function () {
             return validate_trigger_1.validateTrigger.changeOrBlur;
@@ -21533,6 +21742,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
 
 define('aurelia-validation/validation-controller-factory',["require", "exports", "./validation-controller", "./validator"], function (require, exports, validation_controller_1, validator_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Creates ValidationController instances.
      */
@@ -21573,22 +21783,24 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-define('aurelia-validation/validation-errors-custom-attribute',["require", "exports", "aurelia-binding", "aurelia-dependency-injection", "aurelia-templating", "./validation-controller"], function (require, exports, aurelia_binding_1, aurelia_dependency_injection_1, aurelia_templating_1, validation_controller_1) {
+define('aurelia-validation/validation-errors-custom-attribute',["require", "exports", "aurelia-binding", "aurelia-dependency-injection", "aurelia-templating", "./validation-controller", "aurelia-pal"], function (require, exports, aurelia_binding_1, aurelia_dependency_injection_1, aurelia_templating_1, validation_controller_1, aurelia_pal_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationErrorsCustomAttribute = (function () {
         function ValidationErrorsCustomAttribute(boundaryElement, controllerAccessor) {
             this.boundaryElement = boundaryElement;
             this.controllerAccessor = controllerAccessor;
+            this.controller = null;
             this.errors = [];
+            this.errorsInternal = [];
         }
         ValidationErrorsCustomAttribute.prototype.sort = function () {
-            this.errors.sort(function (a, b) {
+            this.errorsInternal.sort(function (a, b) {
                 if (a.targets[0] === b.targets[0]) {
                     return 0;
                 }
-                /* tslint:disable:no-bitwise */
+                // tslint:disable-next-line:no-bitwise
                 return a.targets[0].compareDocumentPosition(b.targets[0]) & 2 ? 1 : -1;
-                /* tslint:enable:no-bitwise */
             });
         };
         ValidationErrorsCustomAttribute.prototype.interestingElements = function (elements) {
@@ -21597,9 +21809,9 @@ define('aurelia-validation/validation-errors-custom-attribute',["require", "expo
         };
         ValidationErrorsCustomAttribute.prototype.render = function (instruction) {
             var _loop_1 = function (result) {
-                var index = this_1.errors.findIndex(function (x) { return x.error === result; });
+                var index = this_1.errorsInternal.findIndex(function (x) { return x.error === result; });
                 if (index !== -1) {
-                    this_1.errors.splice(index, 1);
+                    this_1.errorsInternal.splice(index, 1);
                 }
             };
             var this_1 = this;
@@ -21614,30 +21826,42 @@ define('aurelia-validation/validation-errors-custom-attribute',["require", "expo
                 }
                 var targets = this.interestingElements(elements);
                 if (targets.length) {
-                    this.errors.push({ error: result, targets: targets });
+                    this.errorsInternal.push({ error: result, targets: targets });
                 }
             }
             this.sort();
-            this.value = this.errors;
+            this.errors = this.errorsInternal;
         };
         ValidationErrorsCustomAttribute.prototype.bind = function () {
-            this.controllerAccessor().addRenderer(this);
-            this.value = this.errors;
+            if (!this.controller) {
+                this.controller = this.controllerAccessor();
+            }
+            // this will call render() with the side-effect of updating this.errors
+            this.controller.addRenderer(this);
         };
         ValidationErrorsCustomAttribute.prototype.unbind = function () {
-            this.controllerAccessor().removeRenderer(this);
+            if (this.controller) {
+                this.controller.removeRenderer(this);
+            }
         };
         return ValidationErrorsCustomAttribute;
     }());
-    ValidationErrorsCustomAttribute.inject = [Element, aurelia_dependency_injection_1.Lazy.of(validation_controller_1.ValidationController)];
+    ValidationErrorsCustomAttribute.inject = [aurelia_pal_1.DOM.Element, aurelia_dependency_injection_1.Lazy.of(validation_controller_1.ValidationController)];
+    __decorate([
+        aurelia_templating_1.bindable({ defaultBindingMode: aurelia_binding_1.bindingMode.oneWay })
+    ], ValidationErrorsCustomAttribute.prototype, "controller", void 0);
+    __decorate([
+        aurelia_templating_1.bindable({ primaryProperty: true, defaultBindingMode: aurelia_binding_1.bindingMode.twoWay })
+    ], ValidationErrorsCustomAttribute.prototype, "errors", void 0);
     ValidationErrorsCustomAttribute = __decorate([
-        aurelia_templating_1.customAttribute('validation-errors', aurelia_binding_1.bindingMode.twoWay)
+        aurelia_templating_1.customAttribute('validation-errors')
     ], ValidationErrorsCustomAttribute);
     exports.ValidationErrorsCustomAttribute = ValidationErrorsCustomAttribute;
 });
 
 define('aurelia-validation/validation-renderer-custom-attribute',["require", "exports", "./validation-controller"], function (require, exports, validation_controller_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationRendererCustomAttribute = (function () {
         function ValidationRendererCustomAttribute() {
         }
@@ -21661,6 +21885,7 @@ define('aurelia-validation/validation-renderer-custom-attribute',["require", "ex
 
 define('aurelia-validation/implementation/rules',["require", "exports"], function (require, exports) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Sets, unsets and retrieves rules on an object or constructor function.
      */
@@ -21702,19 +21927,26 @@ define('aurelia-validation/implementation/rules',["require", "exports"], functio
 
 define('aurelia-validation/implementation/util',["require", "exports"], function (require, exports) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     function isString(value) {
         return Object.prototype.toString.call(value) === '[object String]';
     }
     exports.isString = isString;
 });
 
-var __extends = (this && this.__extends) || function (d, b) {
-    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
-    function __() { this.constructor = d; }
-    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
-};
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = Object.setPrototypeOf ||
+        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    return function (d, b) {
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
 define('aurelia-validation/implementation/validation-parser',["require", "exports", "aurelia-binding", "aurelia-templating", "./util", "aurelia-logging"], function (require, exports, aurelia_binding_1, aurelia_templating_1, util_1, LogManager) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationParser = (function () {
         function ValidationParser(parser, bindinqLanguage) {
             this.parser = parser;
@@ -21759,7 +21991,9 @@ define('aurelia-validation/implementation/validation-parser',["require", "export
             return new aurelia_binding_1.Conditional(new aurelia_binding_1.Binary('||', new aurelia_binding_1.Binary('===', part, this.nullExpression), new aurelia_binding_1.Binary('===', part, this.undefinedExpression)), this.emptyStringExpression, new aurelia_binding_1.CallMember(part, 'toString', []));
         };
         ValidationParser.prototype.getAccessorExpression = function (fn) {
-            var classic = /^function\s*\([$_\w\d]+\)\s*\{\s*(?:"use strict";)?\s*return\s+[$_\w\d]+\.([$_\w\d]+)\s*;?\s*\}$/;
+            /* tslint:disable:max-line-length */
+            var classic = /^function\s*\([$_\w\d]+\)\s*\{(?:\s*"use strict";)?\s*(?:[$_\w\d.['"\]+;]+)?\s*return\s+[$_\w\d]+\.([$_\w\d]+)\s*;?\s*\}$/;
+            /* tslint:enable:max-line-length */
             var arrow = /^\(?[$_\w\d]+\)?\s*=>\s*[$_\w\d]+\.([$_\w\d]+)$/;
             var match = classic.exec(fn) || arrow.exec(fn);
             if (match === null) {
@@ -21798,6 +22032,7 @@ define('aurelia-validation/implementation/validation-parser',["require", "export
 
 define('aurelia-validation/implementation/validation-messages',["require", "exports", "./validation-parser"], function (require, exports, validation_parser_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Dictionary of validation messages. [messageKey]: messageExpression
      */
@@ -21844,7 +22079,7 @@ define('aurelia-validation/implementation/validation-messages',["require", "expo
          */
         ValidationMessageProvider.prototype.getDisplayName = function (propertyName, displayName) {
             if (displayName !== null && displayName !== undefined) {
-                return displayName;
+                return (displayName instanceof Function) ? displayName() : displayName;
             }
             // split on upper-case letters.
             var words = propertyName.split(/(?=[A-Z])/).join(' ');
@@ -21857,13 +22092,19 @@ define('aurelia-validation/implementation/validation-messages',["require", "expo
     exports.ValidationMessageProvider = ValidationMessageProvider;
 });
 
-var __extends = (this && this.__extends) || function (d, b) {
-    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
-    function __() { this.constructor = d; }
-    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
-};
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = Object.setPrototypeOf ||
+        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    return function (d, b) {
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
 define('aurelia-validation/implementation/standard-validator',["require", "exports", "aurelia-templating", "../validator", "../validate-result", "./rules", "./validation-messages"], function (require, exports, aurelia_templating_1, validator_1, validate_result_1, rules_1, validation_messages_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Validates.
      * Responsible for validating objects and properties.
@@ -21912,6 +22153,7 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
         };
         StandardValidator.prototype.getMessage = function (rule, object, value) {
             var expression = rule.message || this.messageProvider.getMessage(rule.messageKey);
+            // tslint:disable-next-line:prefer-const
             var _a = rule.property, propertyName = _a.name, displayName = _a.displayName;
             if (propertyName !== null) {
                 displayName = this.messageProvider.getDisplayName(propertyName, displayName);
@@ -21922,6 +22164,8 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
                 $value: value,
                 $object: object,
                 $config: rule.config,
+                // returns the name of a given property, given just the property name (irrespective of the property's displayName)
+                // split on capital letters, first letter ensured to be capitalized
                 $getDisplayName: this.getDisplayName
             };
             return expression.evaluate({ bindingContext: object, overrideContext: overrideContext }, this.lookupFunctions);
@@ -21989,6 +22233,7 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
 
 define('aurelia-validation/implementation/validation-rules',["require", "exports", "./util", "./rules", "./validation-messages"], function (require, exports, util_1, rules_1, validation_messages_1) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * Part of the fluent rule API. Enables customizing property rules.
      */
@@ -22334,6 +22579,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
         };
         /**
          * Adds a rule definition to the sequenced ruleset.
+         * @internal
          */
         FluentEnsure.prototype._addRule = function (rule) {
             while (this.rules.length < rule.sequence + 1) {
@@ -22345,7 +22591,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
             if (this.parser) {
                 return;
             }
-            throw new Error("Did you forget to add \".plugin('aurelia-validation)\" to your main.js?");
+            throw new Error("Did you forget to add \".plugin('aurelia-validation')\" to your main.js?");
         };
         return FluentEnsure;
     }());
@@ -22405,11 +22651,13 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
 });
 
 // Exports
-define('aurelia-validation/aurelia-validation',["require", "exports", "./property-info", "./validate-binding-behavior", "./validate-result", "./validate-trigger", "./validation-controller", "./validation-controller-factory", "./validation-errors-custom-attribute", "./validation-renderer-custom-attribute", "./validator", "./implementation/rules", "./implementation/standard-validator", "./implementation/validation-messages", "./implementation/validation-parser", "./implementation/validation-rules", "./validator", "./implementation/standard-validator", "./implementation/validation-parser", "./implementation/validation-rules"], function (require, exports, property_info_1, validate_binding_behavior_1, validate_result_1, validate_trigger_1, validation_controller_1, validation_controller_factory_1, validation_errors_custom_attribute_1, validation_renderer_custom_attribute_1, validator_1, rules_1, standard_validator_1, validation_messages_1, validation_parser_1, validation_rules_1, validator_2, standard_validator_2, validation_parser_2, validation_rules_2) {
+define('aurelia-validation/aurelia-validation',["require", "exports", "./get-target-dom-element", "./property-info", "./validate-binding-behavior", "./validate-result", "./validate-trigger", "./validation-controller", "./validation-controller-factory", "./validation-errors-custom-attribute", "./validation-renderer-custom-attribute", "./validator", "./implementation/rules", "./implementation/standard-validator", "./implementation/validation-messages", "./implementation/validation-parser", "./implementation/validation-rules", "aurelia-pal", "./validator", "./implementation/standard-validator", "./implementation/validation-parser", "./implementation/validation-rules"], function (require, exports, get_target_dom_element_1, property_info_1, validate_binding_behavior_1, validate_result_1, validate_trigger_1, validation_controller_1, validation_controller_factory_1, validation_errors_custom_attribute_1, validation_renderer_custom_attribute_1, validator_1, rules_1, standard_validator_1, validation_messages_1, validation_parser_1, validation_rules_1, aurelia_pal_1, validator_2, standard_validator_2, validation_parser_2, validation_rules_2) {
     "use strict";
     function __export(m) {
         for (var p in m) if (!exports.hasOwnProperty(p)) exports[p] = m[p];
     }
+    Object.defineProperty(exports, "__esModule", { value: true });
+    __export(get_target_dom_element_1);
     __export(property_info_1);
     __export(validate_binding_behavior_1);
     __export(validate_result_1);
@@ -22452,7 +22700,7 @@ define('aurelia-validation/aurelia-validation',["require", "exports", "./propert
      */
     function configure(frameworkConfig, callback) {
         // the fluent rule definition API needs the parser to translate messages
-        // to interpolation expressions. 
+        // to interpolation expressions.
         var parser = frameworkConfig.container.get(validation_parser_2.ValidationParser);
         validation_rules_2.ValidationRules.initialize(parser);
         // configure...
@@ -22462,7 +22710,9 @@ define('aurelia-validation/aurelia-validation',["require", "exports", "./propert
         }
         config.apply(frameworkConfig.container);
         // globalize the behaviors.
-        frameworkConfig.globalResources('./validate-binding-behavior', './validation-errors-custom-attribute', './validation-renderer-custom-attribute');
+        if (frameworkConfig.globalResources) {
+            frameworkConfig.globalResources(aurelia_pal_1.PLATFORM.moduleName('./validate-binding-behavior'), aurelia_pal_1.PLATFORM.moduleName('./validation-errors-custom-attribute'), aurelia_pal_1.PLATFORM.moduleName('./validation-renderer-custom-attribute'));
+        }
     }
     exports.configure = configure;
 });
