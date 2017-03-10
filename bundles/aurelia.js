@@ -7166,10 +7166,9 @@ define('aurelia-bootstrapper',['module', 'exports', 'aurelia-pal', 'aurelia-poly
     }).then(function (_ref) {
       var frameworkName = _ref[0];
       return loader.loadModule(frameworkName);
-    }).then(function (_ref2) {
-      var Aurelia = _ref2.Aurelia;
+    }).then(function (fx) {
       return startResolve(function () {
-        return new Aurelia(loader);
+        return new fx.Aurelia(loader);
       });
     });
   }
