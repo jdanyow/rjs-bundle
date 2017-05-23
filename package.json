@@ -48,7 +48,7 @@
     "aurelia-route-recognizer": "^1.1.0",
     "aurelia-router": "^1.3.0",
     "aurelia-task-queue": "^1.2.0",
-    "aurelia-templating": "^1.4.1",
+    "aurelia-templating": "^1.4.2",
     "aurelia-templating-binding": "^1.3.0",
     "aurelia-templating-resources": "^1.4.0",
     "aurelia-templating-router": "^1.1.0",
