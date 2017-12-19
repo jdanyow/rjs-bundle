@@ -3166,7 +3166,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
     Scanner.prototype.scanOperator = function scanOperator(start, text) {
       assert(this.peek === text.charCodeAt(0));
-      assert(OPERATORS.indexOf(text) !== -1);
+      assert(OPERATORS[text] === 1);
       this.advance();
       return new Token(start, text).withOp(text);
     };
@@ -3187,7 +3187,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         text += two;
       }
 
-      assert(OPERATORS.indexOf(text) !== -1);
+      assert(OPERATORS[text] === 1);
 
       return new Token(start, text).withOp(text);
     };
@@ -3205,7 +3205,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       var text = this.input.substring(start, this.index);
       var result = new Token(start, text);
 
-      if (OPERATORS.indexOf(text) !== -1) {
+      if (OPERATORS[text] === 1) {
         result.withOp(text);
       } else {
         result.withGetterSetter(text);
@@ -3328,7 +3328,33 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     return Scanner;
   }();
 
-  var OPERATORS = ['undefined', 'null', 'true', 'false', '+', '-', '*', '/', '%', '^', '=', '==', '===', '!=', '!==', '<', '>', '<=', '>=', '&&', '||', '&', '|', '!', '?'];
+  var OPERATORS = {
+    'undefined': 1,
+    'null': 1,
+    'true': 1,
+    'false': 1,
+    '+': 1,
+    '-': 1,
+    '*': 1,
+    '/': 1,
+    '%': 1,
+    '^': 1,
+    '=': 1,
+    '==': 1,
+    '===': 1,
+    '!=': 1,
+    '!==': 1,
+    '<': 1,
+    '>': 1,
+    '<=': 1,
+    '>=': 1,
+    '&&': 1,
+    '||': 1,
+    '&': 1,
+    '|': 1,
+    '!': 1,
+    '?': 1
+  };
 
   var $EOF = 0;
   var $TAB = 9;
@@ -5669,7 +5695,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         this.updateTarget(value);
       }
 
-      if (mode === bindingMode.toView) {
+      if (mode === bindingMode.oneTime) {
+        return;
+      } else if (mode === bindingMode.toView) {
         enqueueBindingConnect(this);
       } else if (mode === bindingMode.twoWay) {
         this.sourceExpression.connect(this, source);
