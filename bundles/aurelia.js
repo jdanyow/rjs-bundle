@@ -7,6 +7,10 @@ define('aurelia-logging',['exports'], function (exports) {
   exports.getLogger = getLogger;
   exports.addAppender = addAppender;
   exports.removeAppender = removeAppender;
+  exports.getAppenders = getAppenders;
+  exports.clearAppenders = clearAppenders;
+  exports.addCustomLevel = addCustomLevel;
+  exports.removeCustomLevel = removeCustomLevel;
   exports.setLevel = setLevel;
   exports.getLevel = getLevel;
 
@@ -14,15 +18,22 @@ define('aurelia-logging',['exports'], function (exports) {
 
   var logLevel = exports.logLevel = {
     none: 0,
-    error: 1,
-    warn: 2,
-    info: 3,
-    debug: 4
+    error: 10,
+    warn: 20,
+    info: 30,
+    debug: 40
   };
 
   var loggers = {};
   var appenders = [];
   var globalDefaultLevel = logLevel.none;
+
+  var standardLevels = ['none', 'error', 'warn', 'info', 'debug'];
+  function isStandardLevel(level) {
+    return standardLevels.filter(function (l) {
+      return l === level;
+    }).length > 0;
+  }
 
   function appendArgs() {
     return [this].concat(Array.prototype.slice.call(arguments));
@@ -45,12 +56,44 @@ define('aurelia-logging',['exports'], function (exports) {
     };
   }
 
+  function logFactoryCustom(level) {
+    var threshold = logLevel[level];
+    return function () {
+      if (this.level < threshold) {
+        return;
+      }
+
+      var args = appendArgs.apply(this, arguments);
+      var i = appenders.length;
+      while (i--) {
+        var appender = appenders[i];
+        if (appender[level] !== undefined) {
+          appender[level].apply(appender, args);
+        }
+      }
+    };
+  }
+
   function connectLoggers() {
     var proto = Logger.prototype;
-    proto.debug = logFactory('debug');
-    proto.info = logFactory('info');
-    proto.warn = logFactory('warn');
-    proto.error = logFactory('error');
+    for (var _level in logLevel) {
+      if (isStandardLevel(_level)) {
+        if (_level !== 'none') {
+          proto[_level] = logFactory(_level);
+        }
+      } else {
+        proto[_level] = logFactoryCustom(_level);
+      }
+    }
+  }
+
+  function disconnectLoggers() {
+    var proto = Logger.prototype;
+    for (var _level2 in logLevel) {
+      if (_level2 !== 'none') {
+        proto[_level2] = function () {};
+      }
+    }
   }
 
   function getLogger(id) {
@@ -67,6 +110,46 @@ define('aurelia-logging',['exports'], function (exports) {
     appenders = appenders.filter(function (a) {
       return a !== appender;
     });
+  }
+
+  function getAppenders() {
+    return [].concat(appenders);
+  }
+
+  function clearAppenders() {
+    appenders = [];
+    disconnectLoggers();
+  }
+
+  function addCustomLevel(name, value) {
+    if (logLevel[name] !== undefined) {
+      throw Error('Log level "' + name + '" already exists.');
+    }
+
+    if (isNaN(value)) {
+      throw Error('Value must be a number.');
+    }
+
+    logLevel[name] = value;
+
+    if (appenders.length > 0) {
+      connectLoggers();
+    } else {
+      Logger.prototype[name] = function () {};
+    }
+  }
+
+  function removeCustomLevel(name) {
+    if (logLevel[name] === undefined) {
+      return;
+    }
+
+    if (isStandardLevel(name)) {
+      throw Error('Built-in log level "' + name + '" cannot be removed.');
+    }
+
+    delete logLevel[name];
+    delete Logger.prototype[name];
   }
 
   function setLevel(level) {
@@ -703,7 +786,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.getSetObserver = exports.BindingEngine = exports.NameExpression = exports.Listener = exports.ListenerExpression = exports.BindingBehaviorResource = exports.ValueConverterResource = exports.Call = exports.CallExpression = exports.Binding = exports.BindingExpression = exports.ObjectObservationAdapter = exports.ObserverLocator = exports.SVGAnalyzer = exports.presentationAttributes = exports.presentationElements = exports.elements = exports.ComputedExpression = exports.ClassObserver = exports.SelectValueObserver = exports.CheckedObserver = exports.ValueAttributeObserver = exports.StyleObserver = exports.DataAttributeObserver = exports.dataAttributeAccessor = exports.XLinkAttributeObserver = exports.SetterObserver = exports.PrimitiveObserver = exports.propertyAccessor = exports.DirtyCheckProperty = exports.DirtyChecker = exports.EventManager = exports.delegationStrategy = exports.getMapObserver = exports.ParserImplementation = exports.Parser = exports.Scanner = exports.Lexer = exports.Token = exports.bindingMode = exports.ExpressionCloner = exports.Unparser = exports.LiteralObject = exports.LiteralArray = exports.LiteralString = exports.LiteralPrimitive = exports.PrefixNot = exports.Binary = exports.CallFunction = exports.CallMember = exports.CallScope = exports.AccessKeyed = exports.AccessMember = exports.AccessScope = exports.AccessThis = exports.Conditional = exports.Assign = exports.ValueConverter = exports.BindingBehavior = exports.Chain = exports.Expression = exports.getArrayObserver = exports.CollectionLengthObserver = exports.ModifyCollectionObserver = exports.ExpressionObserver = exports.sourceContext = exports.targetContext = undefined;
+  exports.getSetObserver = exports.BindingEngine = exports.NameExpression = exports.Listener = exports.ListenerExpression = exports.BindingBehaviorResource = exports.ValueConverterResource = exports.Call = exports.CallExpression = exports.Binding = exports.BindingExpression = exports.ObjectObservationAdapter = exports.ObserverLocator = exports.SVGAnalyzer = exports.presentationAttributes = exports.presentationElements = exports.elements = exports.ComputedExpression = exports.ClassObserver = exports.SelectValueObserver = exports.CheckedObserver = exports.ValueAttributeObserver = exports.StyleObserver = exports.DataAttributeObserver = exports.dataAttributeAccessor = exports.XLinkAttributeObserver = exports.SetterObserver = exports.PrimitiveObserver = exports.propertyAccessor = exports.DirtyCheckProperty = exports.DirtyChecker = exports.EventSubscriber = exports.EventManager = exports.delegationStrategy = exports.getMapObserver = exports.ParserImplementation = exports.Parser = exports.Scanner = exports.Lexer = exports.Token = exports.bindingMode = exports.ExpressionCloner = exports.Unparser = exports.LiteralObject = exports.LiteralArray = exports.LiteralString = exports.LiteralPrimitive = exports.PrefixNot = exports.Binary = exports.CallFunction = exports.CallMember = exports.CallScope = exports.AccessKeyed = exports.AccessMember = exports.AccessScope = exports.AccessThis = exports.Conditional = exports.Assign = exports.ValueConverter = exports.BindingBehavior = exports.Chain = exports.Expression = exports.getArrayObserver = exports.CollectionLengthObserver = exports.ModifyCollectionObserver = exports.ExpressionObserver = exports.sourceContext = exports.targetContext = undefined;
   exports.camelCase = camelCase;
   exports.createOverrideContext = createOverrideContext;
   exports.getContextFor = getContextFor;
@@ -748,7 +831,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
     return typeof obj;
   } : function (obj) {
-    return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj;
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
   };
 
   var _createClass = function () {
@@ -2768,7 +2851,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       Unparser.prototype.visitChain = function visitChain(chain) {
         var expressions = chain.expressions;
 
-        for (var _i16 = 0, length = expression.length; _i16 < length; ++_i16) {
+        for (var _i16 = 0, length = expressions.length; _i16 < length; ++_i16) {
           if (_i16 !== 0) {
             this.write(';');
           }
@@ -3319,7 +3402,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     Scanner.prototype.error = function error(message) {
-      var offset = arguments.length <= 1 || arguments[1] === undefined ? 0 : arguments[1];
+      var offset = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
 
       var position = this.index + offset;
       throw new Error('Lexer Error: ' + message + ' at column ' + position + ' in expression [' + this.input + ']');
@@ -3560,9 +3643,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       while (this.peek.text === '=') {
         if (!result.isAssignable) {
           var end = this.index < this.tokens.length ? this.peek.index : this.input.length;
-          var _expression = this.input.substring(start, end);
+          var expression = this.input.substring(start, end);
 
-          this.error('Expression ' + _expression + ' is not assignable');
+          this.error('Expression ' + expression + ' is not assignable');
         }
 
         this.expect('=');
@@ -3581,9 +3664,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
         if (!this.optional(':')) {
           var end = this.index < this.tokens.length ? this.peek.index : this.input.length;
-          var _expression2 = this.input.substring(start, end);
+          var expression = this.input.substring(start, end);
 
-          this.error('Conditional expression ' + _expression2 + ' requires all 3 expressions');
+          this.error('Conditional expression ' + expression + ' requires all 3 expressions');
         }
 
         var no = this.parseExpression();
@@ -3743,9 +3826,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       } else if (this.optional('false')) {
         return new LiteralPrimitive(false);
       } else if (this.optional('[')) {
-        var elements = this.parseExpressionList(']');
+        var _elements = this.parseExpressionList(']');
         this.expect(']');
-        return new LiteralArray(elements);
+        return new LiteralArray(_elements);
       } else if (this.peek.text === '{') {
         return this.parseObject();
       } else if (this.peek.key !== null && this.peek.key !== undefined) {
@@ -3963,13 +4046,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     this.propagationStopped = true;
   }
 
-  function interceptStopPropagation(event) {
-    event.standardStopPropagation = event.stopPropagation;
-    event.stopPropagation = stopPropagation;
-  }
-
   function handleCapturedEvent(event) {
-    var interceptInstalled = false;
     event.propagationStopped = false;
     var target = findOriginalEventTarget(event);
 
@@ -3979,24 +4056,21 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       if (target.capturedCallbacks) {
         var callback = target.capturedCallbacks[event.type];
         if (callback) {
-          if (!interceptInstalled) {
-            interceptStopPropagation(event);
-            interceptInstalled = true;
+          if (event.stopPropagation !== stopPropagation) {
+            event.standardStopPropagation = event.stopPropagation;
+            event.stopPropagation = stopPropagation;
           }
           orderedCallbacks.push(callback);
         }
       }
       target = target.parentNode;
     }
-    for (var _i22 = orderedCallbacks.length - 1; _i22 >= 0; _i22--) {
+    for (var _i22 = orderedCallbacks.length - 1; _i22 >= 0 && !event.propagationStopped; _i22--) {
       var orderedCallback = orderedCallbacks[_i22];
       if ('handleEvent' in orderedCallback) {
         orderedCallback.handleEvent(event);
       } else {
         orderedCallback(event);
-      }
-      if (event.propagationStopped) {
-        break;
       }
     }
   }
@@ -4029,7 +4103,6 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   }();
 
   function handleDelegatedEvent(event) {
-    var interceptInstalled = false;
     event.propagationStopped = false;
     var target = findOriginalEventTarget(event);
 
@@ -4037,9 +4110,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       if (target.delegatedCallbacks) {
         var callback = target.delegatedCallbacks[event.type];
         if (callback) {
-          if (!interceptInstalled) {
-            interceptStopPropagation(event);
-            interceptInstalled = true;
+          if (event.stopPropagation !== stopPropagation) {
+            event.standardStopPropagation = event.stopPropagation;
+            event.stopPropagation = stopPropagation;
           }
           if ('handleEvent' in callback) {
             callback.handleEvent(event);
@@ -4073,11 +4146,46 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       this.count--;
 
       if (this.count === 0) {
-        _aureliaPal.DOM.removeEventListener(this.eventName, handleDelegatedEvent);
+        _aureliaPal.DOM.removeEventListener(this.eventName, handleDelegatedEvent, false);
       }
     };
 
     return DelegateHandlerEntry;
+  }();
+
+  var DelegationEntryHandler = function () {
+    function DelegationEntryHandler(entry, lookup, targetEvent) {
+      
+
+      this.entry = entry;
+      this.lookup = lookup;
+      this.targetEvent = targetEvent;
+    }
+
+    DelegationEntryHandler.prototype.dispose = function dispose() {
+      this.entry.decrement();
+      this.lookup[this.targetEvent] = null;
+      this.entry = this.lookup = this.targetEvent = null;
+    };
+
+    return DelegationEntryHandler;
+  }();
+
+  var EventHandler = function () {
+    function EventHandler(target, targetEvent, callback) {
+      
+
+      this.target = target;
+      this.targetEvent = targetEvent;
+      this.callback = callback;
+    }
+
+    EventHandler.prototype.dispose = function dispose() {
+      this.target.removeEventListener(this.targetEvent, this.callback);
+      this.target = this.targetEvent = this.callback = null;
+    };
+
+    return EventHandler;
   }();
 
   var DefaultEventStrategy = function () {
@@ -4088,53 +4196,51 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       this.capturedHandlers = {};
     }
 
-    DefaultEventStrategy.prototype.subscribe = function subscribe(target, targetEvent, callback, strategy) {
-      var _this22 = this;
-
+    DefaultEventStrategy.prototype.subscribe = function subscribe(target, targetEvent, callback, strategy, disposable) {
       var delegatedHandlers = void 0;
       var capturedHandlers = void 0;
       var handlerEntry = void 0;
 
       if (strategy === delegationStrategy.bubbling) {
-        var _ret = function () {
-          delegatedHandlers = _this22.delegatedHandlers;
-          handlerEntry = delegatedHandlers[targetEvent] || (delegatedHandlers[targetEvent] = new DelegateHandlerEntry(targetEvent));
-          var delegatedCallbacks = target.delegatedCallbacks || (target.delegatedCallbacks = {});
+        delegatedHandlers = this.delegatedHandlers;
+        handlerEntry = delegatedHandlers[targetEvent] || (delegatedHandlers[targetEvent] = new DelegateHandlerEntry(targetEvent));
+        var delegatedCallbacks = target.delegatedCallbacks || (target.delegatedCallbacks = {});
 
-          handlerEntry.increment();
-          delegatedCallbacks[targetEvent] = callback;
+        handlerEntry.increment();
+        delegatedCallbacks[targetEvent] = callback;
 
-          return {
-            v: function v() {
-              handlerEntry.decrement();
-              delegatedCallbacks[targetEvent] = null;
-            }
-          };
-        }();
+        if (disposable === true) {
+          return new DelegationEntryHandler(handlerEntry, delegatedCallbacks, targetEvent);
+        }
 
-        if ((typeof _ret === 'undefined' ? 'undefined' : _typeof(_ret)) === "object") return _ret.v;
+        return function () {
+          handlerEntry.decrement();
+          delegatedCallbacks[targetEvent] = null;
+        };
       }
       if (strategy === delegationStrategy.capturing) {
-        var _ret2 = function () {
-          capturedHandlers = _this22.capturedHandlers;
-          handlerEntry = capturedHandlers[targetEvent] || (capturedHandlers[targetEvent] = new CapturedHandlerEntry(targetEvent));
-          var capturedCallbacks = target.capturedCallbacks || (target.capturedCallbacks = {});
+        capturedHandlers = this.capturedHandlers;
+        handlerEntry = capturedHandlers[targetEvent] || (capturedHandlers[targetEvent] = new CapturedHandlerEntry(targetEvent));
+        var capturedCallbacks = target.capturedCallbacks || (target.capturedCallbacks = {});
 
-          handlerEntry.increment();
-          capturedCallbacks[targetEvent] = callback;
+        handlerEntry.increment();
+        capturedCallbacks[targetEvent] = callback;
 
-          return {
-            v: function v() {
-              handlerEntry.decrement();
-              capturedCallbacks[targetEvent] = null;
-            }
-          };
-        }();
+        if (disposable === true) {
+          return new DelegationEntryHandler(handlerEntry, capturedCallbacks, targetEvent);
+        }
 
-        if ((typeof _ret2 === 'undefined' ? 'undefined' : _typeof(_ret2)) === "object") return _ret2.v;
+        return function () {
+          handlerEntry.decrement();
+          capturedCallbacks[targetEvent] = null;
+        };
       }
 
-      target.addEventListener(targetEvent, callback, false);
+      target.addEventListener(targetEvent, callback);
+
+      if (disposable === true) {
+        return new EventHandler(target, targetEvent, callback);
+      }
 
       return function () {
         target.removeEventListener(targetEvent, callback);
@@ -4203,37 +4309,13 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       var properties = config.properties;
       var propertyName = void 0;
 
-      this.elementHandlerLookup[tagName] = {};
+      var lookup = this.elementHandlerLookup[tagName] = {};
 
       for (propertyName in properties) {
         if (properties.hasOwnProperty(propertyName)) {
-          this.registerElementPropertyConfig(tagName, propertyName, properties[propertyName]);
+          lookup[propertyName] = properties[propertyName];
         }
       }
-    };
-
-    EventManager.prototype.registerElementPropertyConfig = function registerElementPropertyConfig(tagName, propertyName, events) {
-      this.elementHandlerLookup[tagName][propertyName] = this.createElementHandler(events);
-    };
-
-    EventManager.prototype.createElementHandler = function createElementHandler(events) {
-      return {
-        subscribe: function subscribe(target, callbackOrListener) {
-          events.forEach(function (changeEvent) {
-            target.addEventListener(changeEvent, callbackOrListener, false);
-          });
-
-          return function () {
-            events.forEach(function (changeEvent) {
-              target.removeEventListener(changeEvent, callbackOrListener, false);
-            });
-          };
-        }
-      };
-    };
-
-    EventManager.prototype.registerElementHandler = function registerElementHandler(tagName, handler) {
-      this.elementHandlerLookup[tagName.toLowerCase()] = handler;
     };
 
     EventManager.prototype.registerEventStrategy = function registerEventStrategy(eventName, strategy) {
@@ -4248,26 +4330,61 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         tagName = target.tagName.toLowerCase();
 
         if (lookup[tagName] && lookup[tagName][propertyName]) {
-          return lookup[tagName][propertyName];
+          return new EventSubscriber(lookup[tagName][propertyName]);
         }
 
         if (propertyName === 'textContent' || propertyName === 'innerHTML') {
-          return lookup['content editable'].value;
+          return new EventSubscriber(lookup['content editable'].value);
         }
 
         if (propertyName === 'scrollTop' || propertyName === 'scrollLeft') {
-          return lookup['scrollable element'][propertyName];
+          return new EventSubscriber(lookup['scrollable element'][propertyName]);
         }
       }
 
       return null;
     };
 
-    EventManager.prototype.addEventListener = function addEventListener(target, targetEvent, callbackOrListener, delegate) {
-      return (this.eventStrategyLookup[targetEvent] || this.defaultEventStrategy).subscribe(target, targetEvent, callbackOrListener, delegate);
+    EventManager.prototype.addEventListener = function addEventListener(target, targetEvent, callbackOrListener, delegate, disposable) {
+      return (this.eventStrategyLookup[targetEvent] || this.defaultEventStrategy).subscribe(target, targetEvent, callbackOrListener, delegate, disposable);
     };
 
     return EventManager;
+  }();
+
+  var EventSubscriber = exports.EventSubscriber = function () {
+    function EventSubscriber(events) {
+      
+
+      this.events = events;
+      this.element = null;
+      this.handler = null;
+    }
+
+    EventSubscriber.prototype.subscribe = function subscribe(element, callbackOrListener) {
+      this.element = element;
+      this.handler = callbackOrListener;
+
+      var events = this.events;
+      for (var _i23 = 0, ii = events.length; ii > _i23; ++_i23) {
+        element.addEventListener(events[_i23], callbackOrListener);
+      }
+    };
+
+    EventSubscriber.prototype.dispose = function dispose() {
+      if (this.element === null) {
+        return;
+      }
+      var element = this.element;
+      var callbackOrListener = this.handler;
+      var events = this.events;
+      for (var _i24 = 0, ii = events.length; ii > _i24; ++_i24) {
+        element.removeEventListener(events[_i24], callbackOrListener);
+      }
+      this.element = this.handler = null;
+    };
+
+    return EventSubscriber;
   }();
 
   var DirtyChecker = exports.DirtyChecker = function () {
@@ -4294,10 +4411,10 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     DirtyChecker.prototype.scheduleDirtyCheck = function scheduleDirtyCheck() {
-      var _this23 = this;
+      var _this22 = this;
 
       setTimeout(function () {
-        return _this23.check();
+        return _this22.check();
       }, this.checkDelay);
     };
 
@@ -4667,7 +4784,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     ValueAttributeObserver.prototype.subscribe = function subscribe(context, callable) {
       if (!this.hasSubscribers()) {
         this.oldValue = this.getValue();
-        this.disposeHandler = this.handler.subscribe(this.element, this);
+        this.handler.subscribe(this.element, this);
       }
 
       this.addSubscriber(context, callable);
@@ -4675,8 +4792,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
     ValueAttributeObserver.prototype.unsubscribe = function unsubscribe(context, callable) {
       if (this.removeSubscriber(context, callable) && !this.hasSubscribers()) {
-        this.disposeHandler();
-        this.disposeHandler = null;
+        this.handler.dispose();
       }
     };
 
@@ -4803,15 +4919,14 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
     CheckedObserver.prototype.subscribe = function subscribe(context, callable) {
       if (!this.hasSubscribers()) {
-        this.disposeHandler = this.handler.subscribe(this.element, this);
+        this.handler.subscribe(this.element, this);
       }
       this.addSubscriber(context, callable);
     };
 
     CheckedObserver.prototype.unsubscribe = function unsubscribe(context, callable) {
       if (this.removeSubscriber(context, callable) && !this.hasSubscribers()) {
-        this.disposeHandler();
-        this.disposeHandler = null;
+        this.handler.dispose();
       }
     };
 
@@ -4904,21 +5019,21 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       };
 
       while (i--) {
-        var _ret3 = _loop();
+        var _ret = _loop();
 
-        if (_ret3 === 'continue') continue;
+        if (_ret === 'continue') continue;
       }
     };
 
     SelectValueObserver.prototype.synchronizeValue = function synchronizeValue() {
-      var _this24 = this;
+      var _this23 = this;
 
       var options = this.element.options;
       var count = 0;
       var value = [];
 
-      for (var _i23 = 0, ii = options.length; _i23 < ii; _i23++) {
-        var _option = options.item(_i23);
+      for (var _i25 = 0, ii = options.length; _i25 < ii; _i25++) {
+        var _option = options.item(_i25);
         if (!_option.selected) {
           continue;
         }
@@ -4928,25 +5043,25 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       if (this.element.multiple) {
         if (Array.isArray(this.value)) {
-          var _ret4 = function () {
-            var matcher = _this24.element.matcher || function (a, b) {
+          var _ret2 = function () {
+            var matcher = _this23.element.matcher || function (a, b) {
               return a === b;
             };
 
             var i = 0;
 
             var _loop2 = function _loop2() {
-              var a = _this24.value[i];
+              var a = _this23.value[i];
               if (value.findIndex(function (b) {
                 return matcher(a, b);
               }) === -1) {
-                _this24.value.splice(i, 1);
+                _this23.value.splice(i, 1);
               } else {
                 i++;
               }
             };
 
-            while (i < _this24.value.length) {
+            while (i < _this23.value.length) {
               _loop2();
             }
 
@@ -4954,10 +5069,10 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
             var _loop3 = function _loop3() {
               var a = value[i];
-              if (_this24.value.findIndex(function (b) {
+              if (_this23.value.findIndex(function (b) {
                 return matcher(a, b);
               }) === -1) {
-                _this24.value.push(a);
+                _this23.value.push(a);
               }
               i++;
             };
@@ -4970,7 +5085,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
             };
           }();
 
-          if ((typeof _ret4 === 'undefined' ? 'undefined' : _typeof(_ret4)) === "object") return _ret4.v;
+          if ((typeof _ret2 === 'undefined' ? 'undefined' : _typeof(_ret2)) === "object") return _ret2.v;
         }
       } else {
         if (count === 0) {
@@ -5000,24 +5115,23 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
     SelectValueObserver.prototype.subscribe = function subscribe(context, callable) {
       if (!this.hasSubscribers()) {
-        this.disposeHandler = this.handler.subscribe(this.element, this);
+        this.handler.subscribe(this.element, this);
       }
       this.addSubscriber(context, callable);
     };
 
     SelectValueObserver.prototype.unsubscribe = function unsubscribe(context, callable) {
       if (this.removeSubscriber(context, callable) && !this.hasSubscribers()) {
-        this.disposeHandler();
-        this.disposeHandler = null;
+        this.handler.dispose();
       }
     };
 
     SelectValueObserver.prototype.bind = function bind() {
-      var _this25 = this;
+      var _this24 = this;
 
       this.domObserver = _aureliaPal.DOM.createMutationObserver(function () {
-        _this25.synchronizeOptions();
-        _this25.synchronizeValue();
+        _this24.synchronizeOptions();
+        _this24.synchronizeValue();
       });
       this.domObserver.observe(this.element, { childList: true, subtree: true });
     };
@@ -5057,8 +5171,8 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
 
       if (newValue !== null && newValue !== undefined && newValue.length) {
         names = newValue.split(/\s+/);
-        for (var _i24 = 0, length = names.length; _i24 < length; _i24++) {
-          name = names[_i24];
+        for (var _i26 = 0, length = names.length; _i26 < length; _i26++) {
+          name = names[_i26];
           if (name === '') {
             continue;
           }
@@ -5117,12 +5231,12 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     function ComputedExpression(name, dependencies) {
       
 
-      var _this26 = _possibleConstructorReturn(this, _Expression19.call(this));
+      var _this25 = _possibleConstructorReturn(this, _Expression19.call(this));
 
-      _this26.name = name;
-      _this26.dependencies = dependencies;
-      _this26.isAssignable = true;
-      return _this26;
+      _this25.name = name;
+      _this25.dependencies = dependencies;
+      _this25.isAssignable = true;
+      return _this25;
     }
 
     ComputedExpression.prototype.evaluate = function evaluate(scope, lookupFunctions) {
@@ -5151,9 +5265,9 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   function createComputedObserver(obj, propertyName, descriptor, observerLocator) {
     var dependencies = descriptor.get.dependencies;
     if (!(dependencies instanceof ComputedExpression)) {
-      var _i25 = dependencies.length;
-      while (_i25--) {
-        dependencies[_i25] = observerLocator.parser.parse(dependencies[_i25]);
+      var _i27 = dependencies.length;
+      while (_i27--) {
+        dependencies[_i27] = observerLocator.parser.parse(dependencies[_i27]);
       }
       dependencies = descriptor.get.dependencies = new ComputedExpression(propertyName, dependencies);
     }
@@ -5168,236 +5282,234 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
   var svgAnalyzer = void 0;
 
   if (typeof FEATURE_NO_SVG === 'undefined') {
-    (function () {
-      svgElements = {
-        a: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'target', 'transform', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        altGlyph: ['class', 'dx', 'dy', 'externalResourcesRequired', 'format', 'glyphRef', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        altGlyphDef: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-        altGlyphItem: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-        animate: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        animateColor: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        animateMotion: ['accumulate', 'additive', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keyPoints', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'origin', 'path', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'rotate', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        animateTransform: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'type', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        circle: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'r', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        clipPath: ['class', 'clipPathUnits', 'externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        'color-profile': ['id', 'local', 'name', 'rendering-intent', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        cursor: ['externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        defs: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        desc: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
-        ellipse: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        feBlend: ['class', 'height', 'id', 'in', 'in2', 'mode', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feColorMatrix: ['class', 'height', 'id', 'in', 'result', 'style', 'type', 'values', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feComponentTransfer: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feComposite: ['class', 'height', 'id', 'in', 'in2', 'k1', 'k2', 'k3', 'k4', 'operator', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feConvolveMatrix: ['bias', 'class', 'divisor', 'edgeMode', 'height', 'id', 'in', 'kernelMatrix', 'kernelUnitLength', 'order', 'preserveAlpha', 'result', 'style', 'targetX', 'targetY', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feDiffuseLighting: ['class', 'diffuseConstant', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feDisplacementMap: ['class', 'height', 'id', 'in', 'in2', 'result', 'scale', 'style', 'width', 'x', 'xChannelSelector', 'xml:base', 'xml:lang', 'xml:space', 'y', 'yChannelSelector'],
-        feDistantLight: ['azimuth', 'elevation', 'id', 'xml:base', 'xml:lang', 'xml:space'],
-        feFlood: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feFuncA: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-        feFuncB: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-        feFuncG: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-        feFuncR: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-        feGaussianBlur: ['class', 'height', 'id', 'in', 'result', 'stdDeviation', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feImage: ['class', 'externalResourcesRequired', 'height', 'id', 'preserveAspectRatio', 'result', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feMerge: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feMergeNode: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-        feMorphology: ['class', 'height', 'id', 'in', 'operator', 'radius', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feOffset: ['class', 'dx', 'dy', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        fePointLight: ['id', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
-        feSpecularLighting: ['class', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'specularConstant', 'specularExponent', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feSpotLight: ['id', 'limitingConeAngle', 'pointsAtX', 'pointsAtY', 'pointsAtZ', 'specularExponent', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
-        feTile: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        feTurbulence: ['baseFrequency', 'class', 'height', 'id', 'numOctaves', 'result', 'seed', 'stitchTiles', 'style', 'type', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        filter: ['class', 'externalResourcesRequired', 'filterRes', 'filterUnits', 'height', 'id', 'primitiveUnits', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        font: ['class', 'externalResourcesRequired', 'horiz-adv-x', 'horiz-origin-x', 'horiz-origin-y', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
-        'font-face': ['accent-height', 'alphabetic', 'ascent', 'bbox', 'cap-height', 'descent', 'font-family', 'font-size', 'font-stretch', 'font-style', 'font-variant', 'font-weight', 'hanging', 'id', 'ideographic', 'mathematical', 'overline-position', 'overline-thickness', 'panose-1', 'slope', 'stemh', 'stemv', 'strikethrough-position', 'strikethrough-thickness', 'underline-position', 'underline-thickness', 'unicode-range', 'units-per-em', 'v-alphabetic', 'v-hanging', 'v-ideographic', 'v-mathematical', 'widths', 'x-height', 'xml:base', 'xml:lang', 'xml:space'],
-        'font-face-format': ['id', 'string', 'xml:base', 'xml:lang', 'xml:space'],
-        'font-face-name': ['id', 'name', 'xml:base', 'xml:lang', 'xml:space'],
-        'font-face-src': ['id', 'xml:base', 'xml:lang', 'xml:space'],
-        'font-face-uri': ['id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        foreignObject: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        g: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        glyph: ['arabic-form', 'class', 'd', 'glyph-name', 'horiz-adv-x', 'id', 'lang', 'orientation', 'style', 'unicode', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
-        glyphRef: ['class', 'dx', 'dy', 'format', 'glyphRef', 'id', 'style', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        hkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space'],
-        image: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        line: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'x1', 'x2', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
-        linearGradient: ['class', 'externalResourcesRequired', 'gradientTransform', 'gradientUnits', 'id', 'spreadMethod', 'style', 'x1', 'x2', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
-        marker: ['class', 'externalResourcesRequired', 'id', 'markerHeight', 'markerUnits', 'markerWidth', 'orient', 'preserveAspectRatio', 'refX', 'refY', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
-        mask: ['class', 'externalResourcesRequired', 'height', 'id', 'maskContentUnits', 'maskUnits', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        metadata: ['id', 'xml:base', 'xml:lang', 'xml:space'],
-        'missing-glyph': ['class', 'd', 'horiz-adv-x', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
-        mpath: ['externalResourcesRequired', 'id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        path: ['class', 'd', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'pathLength', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        pattern: ['class', 'externalResourcesRequired', 'height', 'id', 'patternContentUnits', 'patternTransform', 'patternUnits', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'viewBox', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        polygon: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        polyline: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        radialGradient: ['class', 'cx', 'cy', 'externalResourcesRequired', 'fx', 'fy', 'gradientTransform', 'gradientUnits', 'id', 'r', 'spreadMethod', 'style', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        rect: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        script: ['externalResourcesRequired', 'id', 'type', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        set: ['attributeName', 'attributeType', 'begin', 'dur', 'end', 'externalResourcesRequired', 'fill', 'id', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        stop: ['class', 'id', 'offset', 'style', 'xml:base', 'xml:lang', 'xml:space'],
-        style: ['id', 'media', 'title', 'type', 'xml:base', 'xml:lang', 'xml:space'],
-        svg: ['baseProfile', 'class', 'contentScriptType', 'contentStyleType', 'externalResourcesRequired', 'height', 'id', 'onabort', 'onactivate', 'onclick', 'onerror', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onresize', 'onscroll', 'onunload', 'onzoom', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'version', 'viewBox', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'zoomAndPan'],
-        switch: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
-        symbol: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
-        text: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'transform', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        textPath: ['class', 'externalResourcesRequired', 'id', 'lengthAdjust', 'method', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'spacing', 'startOffset', 'style', 'systemLanguage', 'textLength', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
-        title: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
-        tref: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        tspan: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        use: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
-        view: ['externalResourcesRequired', 'id', 'preserveAspectRatio', 'viewBox', 'viewTarget', 'xml:base', 'xml:lang', 'xml:space', 'zoomAndPan'],
-        vkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space']
-      };
+    svgElements = {
+      a: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'target', 'transform', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      altGlyph: ['class', 'dx', 'dy', 'externalResourcesRequired', 'format', 'glyphRef', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      altGlyphDef: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+      altGlyphItem: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+      animate: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      animateColor: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      animateMotion: ['accumulate', 'additive', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keyPoints', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'origin', 'path', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'rotate', 'systemLanguage', 'to', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      animateTransform: ['accumulate', 'additive', 'attributeName', 'attributeType', 'begin', 'by', 'calcMode', 'dur', 'end', 'externalResourcesRequired', 'fill', 'from', 'id', 'keySplines', 'keyTimes', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'type', 'values', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      circle: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'r', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      clipPath: ['class', 'clipPathUnits', 'externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      'color-profile': ['id', 'local', 'name', 'rendering-intent', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      cursor: ['externalResourcesRequired', 'id', 'requiredExtensions', 'requiredFeatures', 'systemLanguage', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      defs: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      desc: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
+      ellipse: ['class', 'cx', 'cy', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      feBlend: ['class', 'height', 'id', 'in', 'in2', 'mode', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feColorMatrix: ['class', 'height', 'id', 'in', 'result', 'style', 'type', 'values', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feComponentTransfer: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feComposite: ['class', 'height', 'id', 'in', 'in2', 'k1', 'k2', 'k3', 'k4', 'operator', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feConvolveMatrix: ['bias', 'class', 'divisor', 'edgeMode', 'height', 'id', 'in', 'kernelMatrix', 'kernelUnitLength', 'order', 'preserveAlpha', 'result', 'style', 'targetX', 'targetY', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feDiffuseLighting: ['class', 'diffuseConstant', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feDisplacementMap: ['class', 'height', 'id', 'in', 'in2', 'result', 'scale', 'style', 'width', 'x', 'xChannelSelector', 'xml:base', 'xml:lang', 'xml:space', 'y', 'yChannelSelector'],
+      feDistantLight: ['azimuth', 'elevation', 'id', 'xml:base', 'xml:lang', 'xml:space'],
+      feFlood: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feFuncA: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+      feFuncB: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+      feFuncG: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+      feFuncR: ['amplitude', 'exponent', 'id', 'intercept', 'offset', 'slope', 'tableValues', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+      feGaussianBlur: ['class', 'height', 'id', 'in', 'result', 'stdDeviation', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feImage: ['class', 'externalResourcesRequired', 'height', 'id', 'preserveAspectRatio', 'result', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feMerge: ['class', 'height', 'id', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feMergeNode: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+      feMorphology: ['class', 'height', 'id', 'in', 'operator', 'radius', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feOffset: ['class', 'dx', 'dy', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      fePointLight: ['id', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
+      feSpecularLighting: ['class', 'height', 'id', 'in', 'kernelUnitLength', 'result', 'specularConstant', 'specularExponent', 'style', 'surfaceScale', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feSpotLight: ['id', 'limitingConeAngle', 'pointsAtX', 'pointsAtY', 'pointsAtZ', 'specularExponent', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'z'],
+      feTile: ['class', 'height', 'id', 'in', 'result', 'style', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      feTurbulence: ['baseFrequency', 'class', 'height', 'id', 'numOctaves', 'result', 'seed', 'stitchTiles', 'style', 'type', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      filter: ['class', 'externalResourcesRequired', 'filterRes', 'filterUnits', 'height', 'id', 'primitiveUnits', 'style', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      font: ['class', 'externalResourcesRequired', 'horiz-adv-x', 'horiz-origin-x', 'horiz-origin-y', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
+      'font-face': ['accent-height', 'alphabetic', 'ascent', 'bbox', 'cap-height', 'descent', 'font-family', 'font-size', 'font-stretch', 'font-style', 'font-variant', 'font-weight', 'hanging', 'id', 'ideographic', 'mathematical', 'overline-position', 'overline-thickness', 'panose-1', 'slope', 'stemh', 'stemv', 'strikethrough-position', 'strikethrough-thickness', 'underline-position', 'underline-thickness', 'unicode-range', 'units-per-em', 'v-alphabetic', 'v-hanging', 'v-ideographic', 'v-mathematical', 'widths', 'x-height', 'xml:base', 'xml:lang', 'xml:space'],
+      'font-face-format': ['id', 'string', 'xml:base', 'xml:lang', 'xml:space'],
+      'font-face-name': ['id', 'name', 'xml:base', 'xml:lang', 'xml:space'],
+      'font-face-src': ['id', 'xml:base', 'xml:lang', 'xml:space'],
+      'font-face-uri': ['id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      foreignObject: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      g: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      glyph: ['arabic-form', 'class', 'd', 'glyph-name', 'horiz-adv-x', 'id', 'lang', 'orientation', 'style', 'unicode', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
+      glyphRef: ['class', 'dx', 'dy', 'format', 'glyphRef', 'id', 'style', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      hkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space'],
+      image: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      line: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'x1', 'x2', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
+      linearGradient: ['class', 'externalResourcesRequired', 'gradientTransform', 'gradientUnits', 'id', 'spreadMethod', 'style', 'x1', 'x2', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y1', 'y2'],
+      marker: ['class', 'externalResourcesRequired', 'id', 'markerHeight', 'markerUnits', 'markerWidth', 'orient', 'preserveAspectRatio', 'refX', 'refY', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
+      mask: ['class', 'externalResourcesRequired', 'height', 'id', 'maskContentUnits', 'maskUnits', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      metadata: ['id', 'xml:base', 'xml:lang', 'xml:space'],
+      'missing-glyph': ['class', 'd', 'horiz-adv-x', 'id', 'style', 'vert-adv-y', 'vert-origin-x', 'vert-origin-y', 'xml:base', 'xml:lang', 'xml:space'],
+      mpath: ['externalResourcesRequired', 'id', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      path: ['class', 'd', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'pathLength', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      pattern: ['class', 'externalResourcesRequired', 'height', 'id', 'patternContentUnits', 'patternTransform', 'patternUnits', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'viewBox', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      polygon: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      polyline: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'points', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      radialGradient: ['class', 'cx', 'cy', 'externalResourcesRequired', 'fx', 'fy', 'gradientTransform', 'gradientUnits', 'id', 'r', 'spreadMethod', 'style', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      rect: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rx', 'ry', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      script: ['externalResourcesRequired', 'id', 'type', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      set: ['attributeName', 'attributeType', 'begin', 'dur', 'end', 'externalResourcesRequired', 'fill', 'id', 'max', 'min', 'onbegin', 'onend', 'onload', 'onrepeat', 'repeatCount', 'repeatDur', 'requiredExtensions', 'requiredFeatures', 'restart', 'systemLanguage', 'to', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      stop: ['class', 'id', 'offset', 'style', 'xml:base', 'xml:lang', 'xml:space'],
+      style: ['id', 'media', 'title', 'type', 'xml:base', 'xml:lang', 'xml:space'],
+      svg: ['baseProfile', 'class', 'contentScriptType', 'contentStyleType', 'externalResourcesRequired', 'height', 'id', 'onabort', 'onactivate', 'onclick', 'onerror', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'onresize', 'onscroll', 'onunload', 'onzoom', 'preserveAspectRatio', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'version', 'viewBox', 'width', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y', 'zoomAndPan'],
+      switch: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'xml:base', 'xml:lang', 'xml:space'],
+      symbol: ['class', 'externalResourcesRequired', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'preserveAspectRatio', 'style', 'viewBox', 'xml:base', 'xml:lang', 'xml:space'],
+      text: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'transform', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      textPath: ['class', 'externalResourcesRequired', 'id', 'lengthAdjust', 'method', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'spacing', 'startOffset', 'style', 'systemLanguage', 'textLength', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space'],
+      title: ['class', 'id', 'style', 'xml:base', 'xml:lang', 'xml:space'],
+      tref: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      tspan: ['class', 'dx', 'dy', 'externalResourcesRequired', 'id', 'lengthAdjust', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'rotate', 'style', 'systemLanguage', 'textLength', 'x', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      use: ['class', 'externalResourcesRequired', 'height', 'id', 'onactivate', 'onclick', 'onfocusin', 'onfocusout', 'onload', 'onmousedown', 'onmousemove', 'onmouseout', 'onmouseover', 'onmouseup', 'requiredExtensions', 'requiredFeatures', 'style', 'systemLanguage', 'transform', 'width', 'x', 'xlink:actuate', 'xlink:arcrole', 'xlink:href', 'xlink:role', 'xlink:show', 'xlink:title', 'xlink:type', 'xml:base', 'xml:lang', 'xml:space', 'y'],
+      view: ['externalResourcesRequired', 'id', 'preserveAspectRatio', 'viewBox', 'viewTarget', 'xml:base', 'xml:lang', 'xml:space', 'zoomAndPan'],
+      vkern: ['g1', 'g2', 'id', 'k', 'u1', 'u2', 'xml:base', 'xml:lang', 'xml:space']
+    };
 
 
-      svgPresentationElements = {
-        'a': true,
-        'altGlyph': true,
-        'animate': true,
-        'animateColor': true,
-        'circle': true,
-        'clipPath': true,
-        'defs': true,
-        'ellipse': true,
-        'feBlend': true,
-        'feColorMatrix': true,
-        'feComponentTransfer': true,
-        'feComposite': true,
-        'feConvolveMatrix': true,
-        'feDiffuseLighting': true,
-        'feDisplacementMap': true,
-        'feFlood': true,
-        'feGaussianBlur': true,
-        'feImage': true,
-        'feMerge': true,
-        'feMorphology': true,
-        'feOffset': true,
-        'feSpecularLighting': true,
-        'feTile': true,
-        'feTurbulence': true,
-        'filter': true,
-        'font': true,
-        'foreignObject': true,
-        'g': true,
-        'glyph': true,
-        'glyphRef': true,
-        'image': true,
-        'line': true,
-        'linearGradient': true,
-        'marker': true,
-        'mask': true,
-        'missing-glyph': true,
-        'path': true,
-        'pattern': true,
-        'polygon': true,
-        'polyline': true,
-        'radialGradient': true,
-        'rect': true,
-        'stop': true,
-        'svg': true,
-        'switch': true,
-        'symbol': true,
-        'text': true,
-        'textPath': true,
-        'tref': true,
-        'tspan': true,
-        'use': true
-      };
+    svgPresentationElements = {
+      'a': true,
+      'altGlyph': true,
+      'animate': true,
+      'animateColor': true,
+      'circle': true,
+      'clipPath': true,
+      'defs': true,
+      'ellipse': true,
+      'feBlend': true,
+      'feColorMatrix': true,
+      'feComponentTransfer': true,
+      'feComposite': true,
+      'feConvolveMatrix': true,
+      'feDiffuseLighting': true,
+      'feDisplacementMap': true,
+      'feFlood': true,
+      'feGaussianBlur': true,
+      'feImage': true,
+      'feMerge': true,
+      'feMorphology': true,
+      'feOffset': true,
+      'feSpecularLighting': true,
+      'feTile': true,
+      'feTurbulence': true,
+      'filter': true,
+      'font': true,
+      'foreignObject': true,
+      'g': true,
+      'glyph': true,
+      'glyphRef': true,
+      'image': true,
+      'line': true,
+      'linearGradient': true,
+      'marker': true,
+      'mask': true,
+      'missing-glyph': true,
+      'path': true,
+      'pattern': true,
+      'polygon': true,
+      'polyline': true,
+      'radialGradient': true,
+      'rect': true,
+      'stop': true,
+      'svg': true,
+      'switch': true,
+      'symbol': true,
+      'text': true,
+      'textPath': true,
+      'tref': true,
+      'tspan': true,
+      'use': true
+    };
 
-      svgPresentationAttributes = {
-        'alignment-baseline': true,
-        'baseline-shift': true,
-        'clip-path': true,
-        'clip-rule': true,
-        'clip': true,
-        'color-interpolation-filters': true,
-        'color-interpolation': true,
-        'color-profile': true,
-        'color-rendering': true,
-        'color': true,
-        'cursor': true,
-        'direction': true,
-        'display': true,
-        'dominant-baseline': true,
-        'enable-background': true,
-        'fill-opacity': true,
-        'fill-rule': true,
-        'fill': true,
-        'filter': true,
-        'flood-color': true,
-        'flood-opacity': true,
-        'font-family': true,
-        'font-size-adjust': true,
-        'font-size': true,
-        'font-stretch': true,
-        'font-style': true,
-        'font-variant': true,
-        'font-weight': true,
-        'glyph-orientation-horizontal': true,
-        'glyph-orientation-vertical': true,
-        'image-rendering': true,
-        'kerning': true,
-        'letter-spacing': true,
-        'lighting-color': true,
-        'marker-end': true,
-        'marker-mid': true,
-        'marker-start': true,
-        'mask': true,
-        'opacity': true,
-        'overflow': true,
-        'pointer-events': true,
-        'shape-rendering': true,
-        'stop-color': true,
-        'stop-opacity': true,
-        'stroke-dasharray': true,
-        'stroke-dashoffset': true,
-        'stroke-linecap': true,
-        'stroke-linejoin': true,
-        'stroke-miterlimit': true,
-        'stroke-opacity': true,
-        'stroke-width': true,
-        'stroke': true,
-        'text-anchor': true,
-        'text-decoration': true,
-        'text-rendering': true,
-        'unicode-bidi': true,
-        'visibility': true,
-        'word-spacing': true,
-        'writing-mode': true
-      };
+    svgPresentationAttributes = {
+      'alignment-baseline': true,
+      'baseline-shift': true,
+      'clip-path': true,
+      'clip-rule': true,
+      'clip': true,
+      'color-interpolation-filters': true,
+      'color-interpolation': true,
+      'color-profile': true,
+      'color-rendering': true,
+      'color': true,
+      'cursor': true,
+      'direction': true,
+      'display': true,
+      'dominant-baseline': true,
+      'enable-background': true,
+      'fill-opacity': true,
+      'fill-rule': true,
+      'fill': true,
+      'filter': true,
+      'flood-color': true,
+      'flood-opacity': true,
+      'font-family': true,
+      'font-size-adjust': true,
+      'font-size': true,
+      'font-stretch': true,
+      'font-style': true,
+      'font-variant': true,
+      'font-weight': true,
+      'glyph-orientation-horizontal': true,
+      'glyph-orientation-vertical': true,
+      'image-rendering': true,
+      'kerning': true,
+      'letter-spacing': true,
+      'lighting-color': true,
+      'marker-end': true,
+      'marker-mid': true,
+      'marker-start': true,
+      'mask': true,
+      'opacity': true,
+      'overflow': true,
+      'pointer-events': true,
+      'shape-rendering': true,
+      'stop-color': true,
+      'stop-opacity': true,
+      'stroke-dasharray': true,
+      'stroke-dashoffset': true,
+      'stroke-linecap': true,
+      'stroke-linejoin': true,
+      'stroke-miterlimit': true,
+      'stroke-opacity': true,
+      'stroke-width': true,
+      'stroke': true,
+      'text-anchor': true,
+      'text-decoration': true,
+      'text-rendering': true,
+      'unicode-bidi': true,
+      'visibility': true,
+      'word-spacing': true,
+      'writing-mode': true
+    };
 
-      var createElement = function createElement(html) {
-        var div = _aureliaPal.DOM.createElement('div');
-        div.innerHTML = html;
-        return div.firstChild;
-      };
+    var createElement = function createElement(html) {
+      var div = _aureliaPal.DOM.createElement('div');
+      div.innerHTML = html;
+      return div.firstChild;
+    };
 
-      svgAnalyzer = function () {
-        function SVGAnalyzer() {
-          
+    svgAnalyzer = function () {
+      function SVGAnalyzer() {
+        
 
-          if (createElement('<svg><altGlyph /></svg>').firstElementChild.nodeName === 'altglyph' && elements.altGlyph) {
-            elements.altglyph = elements.altGlyph;
-            delete elements.altGlyph;
-            elements.altglyphdef = elements.altGlyphDef;
-            delete elements.altGlyphDef;
-            elements.altglyphitem = elements.altGlyphItem;
-            delete elements.altGlyphItem;
-            elements.glyphref = elements.glyphRef;
-            delete elements.glyphRef;
-          }
+        if (createElement('<svg><altGlyph /></svg>').firstElementChild.nodeName === 'altglyph' && elements.altGlyph) {
+          elements.altglyph = elements.altGlyph;
+          delete elements.altGlyph;
+          elements.altglyphdef = elements.altGlyphDef;
+          delete elements.altGlyphDef;
+          elements.altglyphitem = elements.altGlyphItem;
+          delete elements.altGlyphItem;
+          elements.glyphref = elements.glyphRef;
+          delete elements.glyphRef;
         }
+      }
 
-        SVGAnalyzer.prototype.isStandardSvgAttribute = function isStandardSvgAttribute(nodeName, attributeName) {
-          return presentationElements[nodeName] && presentationAttributes[attributeName] || elements[nodeName] && elements[nodeName].indexOf(attributeName) !== -1;
-        };
+      SVGAnalyzer.prototype.isStandardSvgAttribute = function isStandardSvgAttribute(nodeName, attributeName) {
+        return presentationElements[nodeName] && presentationAttributes[attributeName] || elements[nodeName] && elements[nodeName].indexOf(attributeName) !== -1;
+      };
 
-        return SVGAnalyzer;
-      }();
-    })();
+      return SVGAnalyzer;
+    }();
   }
 
   var elements = exports.elements = svgElements;
@@ -5424,6 +5536,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       this.dirtyChecker = dirtyChecker;
       this.svgAnalyzer = svgAnalyzer;
       this.parser = parser;
+
       this.adapters = [];
       this.logger = LogManager.getLogger('observer-locator');
     }
@@ -5473,8 +5586,8 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     ObserverLocator.prototype.getAdapterObserver = function getAdapterObserver(obj, propertyName, descriptor) {
-      for (var _i26 = 0, ii = this.adapters.length; _i26 < ii; _i26++) {
-        var adapter = this.adapters[_i26];
+      for (var _i28 = 0, ii = this.adapters.length; _i28 < ii; _i28++) {
+        var adapter = this.adapters[_i28];
         var observer = adapter.getObserver(obj, propertyName, descriptor);
         if (observer) {
           return observer;
@@ -5780,7 +5893,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     Call.prototype.bind = function bind(source) {
-      var _this27 = this;
+      var _this26 = this;
 
       if (this.isBound) {
         if (this.source === source) {
@@ -5795,7 +5908,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         this.sourceExpression.bind(this, source, this.lookupFunctions);
       }
       this.targetProperty.setValue(function ($event) {
-        return _this27.callSource($event);
+        return _this26.callSource($event);
       });
     };
 
@@ -5948,7 +6061,7 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
       if (this.sourceExpression.bind) {
         this.sourceExpression.bind(this, source, this.lookupFunctions);
       }
-      this._disposeListener = this.eventManager.addEventListener(this.target, this.targetEvent, this, this.delegationStrategy);
+      this._handler = this.eventManager.addEventListener(this.target, this.targetEvent, this, this.delegationStrategy, true);
     };
 
     Listener.prototype.unbind = function unbind() {
@@ -5960,8 +6073,8 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
         this.sourceExpression.unbind(this, this.source);
       }
       this.source = null;
-      this._disposeListener();
-      this._disposeListener = null;
+      this._handler.dispose();
+      this._handler = null;
     };
 
     return Listener;
@@ -6074,18 +6187,18 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     }
 
     BindingEngine.prototype.createBindingExpression = function createBindingExpression(targetProperty, sourceExpression) {
-      var mode = arguments.length <= 2 || arguments[2] === undefined ? bindingMode.toView : arguments[2];
-      var lookupFunctions = arguments.length <= 3 || arguments[3] === undefined ? LookupFunctions : arguments[3];
+      var mode = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : bindingMode.toView;
+      var lookupFunctions = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : LookupFunctions;
 
       return new BindingExpression(this.observerLocator, targetProperty, this.parser.parse(sourceExpression), mode, lookupFunctions);
     };
 
     BindingEngine.prototype.propertyObserver = function propertyObserver(obj, propertyName) {
-      var _this28 = this;
+      var _this27 = this;
 
       return {
         subscribe: function subscribe(callback) {
-          var observer = _this28.observerLocator.getObserver(obj, propertyName);
+          var observer = _this27.observerLocator.getObserver(obj, propertyName);
           observer.subscribe(callback);
           return {
             dispose: function dispose() {
@@ -6097,17 +6210,17 @@ define('aurelia-binding',['exports', 'aurelia-logging', 'aurelia-pal', 'aurelia-
     };
 
     BindingEngine.prototype.collectionObserver = function collectionObserver(collection) {
-      var _this29 = this;
+      var _this28 = this;
 
       return {
         subscribe: function subscribe(callback) {
           var observer = void 0;
           if (collection instanceof Array) {
-            observer = _this29.observerLocator.getArrayObserver(collection);
+            observer = _this28.observerLocator.getArrayObserver(collection);
           } else if (collection instanceof Map) {
-            observer = _this29.observerLocator.getMapObserver(collection);
+            observer = _this28.observerLocator.getMapObserver(collection);
           } else if (collection instanceof Set) {
-            observer = _this29.observerLocator.getSetObserver(collection);
+            observer = _this28.observerLocator.getSetObserver(collection);
           } else {
             throw new Error('collection must be an instance of Array, Map or Set.');
           }
@@ -6852,6 +6965,16 @@ define('aurelia-polyfills',['aurelia-pal'], function (_aureliaPal) {
         }()
       });
     })(Object);
+
+    if (!Object.is) {
+      Object.is = function (x, y) {
+        if (x === y) {
+          return x !== 0 || 1 / x === 1 / y;
+        } else {
+          return x !== x && y !== y;
+        }
+      };
+    }
   }
 
   if (typeof FEATURE_NO_ES2015 === 'undefined') {
@@ -8685,13 +8808,13 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
   }();
 
-  var _class, _temp, _dec, _class2, _dec2, _class3, _dec3, _class4, _dec4, _class5, _dec5, _class6, _class7, _temp2, _dec6, _class8, _class9, _temp3, _class11, _dec7, _class13, _dec8, _class14, _class15, _temp4, _dec9, _class16, _dec10, _class17, _dec11, _class18;
-
   var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
     return typeof obj;
   } : function (obj) {
     return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
   };
+
+  var _class, _temp, _dec, _class2, _dec2, _class3, _dec3, _class4, _dec4, _class5, _dec5, _class6, _class7, _temp2, _dec6, _class8, _class9, _temp3, _class11, _dec7, _class13, _dec8, _class14, _class15, _temp4, _dec9, _class16, _dec10, _class17, _dec11, _class18;
 
   
 
@@ -8920,43 +9043,22 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ElementEvents.prototype.subscribe = function subscribe(eventName, handler) {
-      var _this2 = this;
+      var captureOrOptions = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : true;
 
-      var bubbles = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : true;
-
-      if (handler && typeof handler === 'function') {
-        handler.eventName = eventName;
-        handler.handler = handler;
-        handler.bubbles = bubbles;
-        handler.dispose = function () {
-          _this2.element.removeEventListener(eventName, handler, bubbles);
-          _this2._dequeueHandler(handler);
-        };
-        this.element.addEventListener(eventName, handler, bubbles);
-        this._enqueueHandler(handler);
-        return handler;
+      if (typeof handler === 'function') {
+        var eventHandler = new EventHandlerImpl(this, eventName, handler, captureOrOptions, false);
+        return eventHandler;
       }
 
       return undefined;
     };
 
     ElementEvents.prototype.subscribeOnce = function subscribeOnce(eventName, handler) {
-      var _this3 = this;
+      var captureOrOptions = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : true;
 
-      var bubbles = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : true;
-
-      if (handler && typeof handler === 'function') {
-        var _ret = function () {
-          var _handler = function _handler(event) {
-            handler(event);
-            _handler.dispose();
-          };
-          return {
-            v: _this3.subscribe(eventName, _handler, bubbles)
-          };
-        }();
-
-        if ((typeof _ret === 'undefined' ? 'undefined' : _typeof(_ret)) === "object") return _ret.v;
+      if (typeof handler === 'function') {
+        var eventHandler = new EventHandlerImpl(this, eventName, handler, captureOrOptions, true);
+        return eventHandler;
       }
 
       return undefined;
@@ -8985,6 +9087,39 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     return ElementEvents;
+  }();
+
+  var EventHandlerImpl = function () {
+    function EventHandlerImpl(owner, eventName, handler, captureOrOptions, once) {
+      
+
+      this.owner = owner;
+      this.eventName = eventName;
+      this.handler = handler;
+
+      this.capture = typeof captureOrOptions === 'boolean' ? captureOrOptions : captureOrOptions.capture;
+      this.bubbles = !this.capture;
+      this.captureOrOptions = captureOrOptions;
+      this.once = once;
+      owner.element.addEventListener(eventName, this, captureOrOptions);
+      owner._enqueueHandler(this);
+    }
+
+    EventHandlerImpl.prototype.handleEvent = function handleEvent(e) {
+      var fn = this.handler;
+      fn(e);
+      if (this.once) {
+        this.dispose();
+      }
+    };
+
+    EventHandlerImpl.prototype.dispose = function dispose() {
+      this.owner.element.removeEventListener(this.eventName, this, this.captureOrOptions);
+      this.owner._dequeueHandler(this);
+      this.owner = this.handler = null;
+    };
+
+    return EventHandlerImpl;
   }();
 
   var ResourceLoadContext = exports.ResourceLoadContext = function () {
@@ -10383,7 +10518,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewSlot.prototype.removeMany = function removeMany(viewsToRemove, returnToCache, skipAnimation) {
-      var _this4 = this;
+      var _this2 = this;
 
       var children = this.children;
       var ii = viewsToRemove.length;
@@ -10396,7 +10531,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
           return;
         }
 
-        var animation = _this4.animateView(child, 'leave');
+        var animation = _this2.animateView(child, 'leave');
         if (animation) {
           rmPromises.push(animation.then(function () {
             return child.removeNodes();
@@ -10407,7 +10542,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
       });
 
       var removeAction = function removeAction() {
-        if (_this4.isAttached) {
+        if (_this2.isAttached) {
           for (i = 0; i < ii; ++i) {
             viewsToRemove[i].detached();
           }
@@ -10437,16 +10572,16 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewSlot.prototype.removeAt = function removeAt(index, returnToCache, skipAnimation) {
-      var _this5 = this;
+      var _this3 = this;
 
       var view = this.children[index];
 
       var removeAction = function removeAction() {
-        index = _this5.children.indexOf(view);
+        index = _this3.children.indexOf(view);
         view.removeNodes();
-        _this5.children.splice(index, 1);
+        _this3.children.splice(index, 1);
 
-        if (_this5.isAttached) {
+        if (_this3.isAttached) {
           view.detached();
         }
 
@@ -10470,7 +10605,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewSlot.prototype.removeAll = function removeAll(returnToCache, skipAnimation) {
-      var _this6 = this;
+      var _this4 = this;
 
       var children = this.children;
       var ii = children.length;
@@ -10483,7 +10618,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
           return;
         }
 
-        var animation = _this6.animateView(child, 'leave');
+        var animation = _this4.animateView(child, 'leave');
         if (animation) {
           rmPromises.push(animation.then(function () {
             return child.removeNodes();
@@ -10494,7 +10629,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
       });
 
       var removeAction = function removeAction() {
-        if (_this6.isAttached) {
+        if (_this4.isAttached) {
           for (i = 0; i < ii; ++i) {
             children[i].detached();
           }
@@ -10510,7 +10645,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
           }
         }
 
-        _this6.children = [];
+        _this4.children = [];
       };
 
       if (rmPromises.length > 0) {
@@ -10557,7 +10692,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewSlot.prototype.projectTo = function projectTo(slots) {
-      var _this7 = this;
+      var _this5 = this;
 
       this.projectToSlots = slots;
       this.add = this._projectionAdd;
@@ -10568,7 +10703,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
       this.removeMany = this._projectionRemoveMany;
       this.removeAll = this._projectionRemoveAll;
       this.children.forEach(function (view) {
-        return ShadowDOM.distributeView(view, slots, _this7);
+        return ShadowDOM.distributeView(view, slots, _this5);
       });
     };
 
@@ -10632,10 +10767,10 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewSlot.prototype._projectionRemoveMany = function _projectionRemoveMany(viewsToRemove, returnToCache) {
-      var _this8 = this;
+      var _this6 = this;
 
       viewsToRemove.forEach(function (view) {
-        return _this8.remove(view, returnToCache);
+        return _this6.remove(view, returnToCache);
       });
     };
 
@@ -11239,7 +11374,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
               if (info.command && info.command !== 'options' && type.primaryProperty) {
                 var primaryProperty = type.primaryProperty;
-                attrName = info.attrName = primaryProperty.name;
+                attrName = info.attrName = primaryProperty.attribute;
 
                 info.defaultBindingMode = primaryProperty.defaultBindingMode;
               }
@@ -11380,7 +11515,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
               if (info.command && info.command !== 'options' && type.primaryProperty) {
                 var primaryProperty = type.primaryProperty;
-                attrName = info.attrName = primaryProperty.name;
+                attrName = info.attrName = primaryProperty.attribute;
 
                 info.defaultBindingMode = primaryProperty.defaultBindingMode;
               }
@@ -11755,12 +11890,12 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
   var ProxyViewFactory = function () {
     function ProxyViewFactory(promise) {
-      var _this9 = this;
+      var _this7 = this;
 
       
 
       promise.then(function (x) {
-        return _this9.viewFactory = x;
+        return _this7.viewFactory = x;
       });
     }
 
@@ -11820,7 +11955,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewEngine.prototype.loadViewFactory = function loadViewFactory(urlOrRegistryEntry, compileInstruction, loadContext, target) {
-      var _this10 = this;
+      var _this8 = this;
 
       loadContext = loadContext || new ResourceLoadContext();
 
@@ -11842,14 +11977,14 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
         loadContext.addDependency(url);
 
-        registryEntry.onReady = _this10.loadTemplateResources(registryEntry, compileInstruction, loadContext, target).then(function (resources) {
+        registryEntry.onReady = _this8.loadTemplateResources(registryEntry, compileInstruction, loadContext, target).then(function (resources) {
           registryEntry.resources = resources;
 
           if (registryEntry.template === null) {
             return registryEntry.factory = null;
           }
 
-          var viewFactory = _this10.viewCompiler.compile(registryEntry.template, resources, compileInstruction);
+          var viewFactory = _this8.viewCompiler.compile(registryEntry.template, resources, compileInstruction);
           return registryEntry.factory = viewFactory;
         });
 
@@ -11898,30 +12033,30 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     ViewEngine.prototype.importViewModelResource = function importViewModelResource(moduleImport, moduleMember) {
-      var _this11 = this;
+      var _this9 = this;
 
       return this.loader.loadModule(moduleImport).then(function (viewModelModule) {
         var normalizedId = _aureliaMetadata.Origin.get(viewModelModule).moduleId;
-        var resourceModule = _this11.moduleAnalyzer.analyze(normalizedId, viewModelModule, moduleMember);
+        var resourceModule = _this9.moduleAnalyzer.analyze(normalizedId, viewModelModule, moduleMember);
 
         if (!resourceModule.mainResource) {
           throw new Error('No view model found in module "' + moduleImport + '".');
         }
 
-        resourceModule.initialize(_this11.container);
+        resourceModule.initialize(_this9.container);
 
         return resourceModule.mainResource;
       });
     };
 
     ViewEngine.prototype.importViewResources = function importViewResources(moduleIds, names, resources, compileInstruction, loadContext) {
-      var _this12 = this;
+      var _this10 = this;
 
       loadContext = loadContext || new ResourceLoadContext();
       compileInstruction = compileInstruction || ViewCompileInstruction.normal;
 
       moduleIds = moduleIds.map(function (x) {
-        return _this12._applyLoaderPlugin(x);
+        return _this10._applyLoaderPlugin(x);
       });
 
       return this.loader.loadAllModules(moduleIds).then(function (imports) {
@@ -11931,8 +12066,8 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
         var normalizedId = void 0;
         var current = void 0;
         var associatedModule = void 0;
-        var container = _this12.container;
-        var moduleAnalyzer = _this12.moduleAnalyzer;
+        var container = _this10.container;
+        var moduleAnalyzer = _this10.moduleAnalyzer;
         var allAnalysis = new Array(imports.length);
 
         for (i = 0, ii = imports.length; i < ii; ++i) {
@@ -12573,14 +12708,14 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     HtmlBehaviorResource.prototype.register = function register(registry, name) {
-      var _this13 = this;
+      var _this11 = this;
 
       if (this.attributeName !== null) {
         registry.registerAttribute(name || this.attributeName, this, this.attributeName);
 
         if (Array.isArray(this.aliases)) {
           this.aliases.forEach(function (alias) {
-            registry.registerAttribute(alias, _this13, _this13.attributeName);
+            registry.registerAttribute(alias, _this11, _this11.attributeName);
           });
         }
       }
@@ -12591,7 +12726,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     HtmlBehaviorResource.prototype.load = function load(container, target, loadContext, viewStrategy, transientView) {
-      var _this14 = this;
+      var _this12 = this;
 
       var options = void 0;
 
@@ -12604,8 +12739,8 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
         }
 
         return viewStrategy.loadViewFactory(container.get(ViewEngine), options, loadContext, target).then(function (viewFactory) {
-          if (!transientView || !_this14.viewFactory) {
-            _this14.viewFactory = viewFactory;
+          if (!transientView || !_this12.viewFactory) {
+            _this12.viewFactory = viewFactory;
           }
 
           return viewFactory;
@@ -12800,7 +12935,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     HtmlBehaviorResource.prototype._copyInheritedProperties = function _copyInheritedProperties(container, target) {
-      var _this15 = this;
+      var _this13 = this;
 
       var behavior = void 0;
       var derived = target;
@@ -12821,19 +12956,19 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
       var _loop = function _loop(_i8, _ii8) {
         var prop = behavior.properties[_i8];
 
-        if (_this15.properties.some(function (p) {
+        if (_this13.properties.some(function (p) {
           return p.name === prop.name;
         })) {
           return 'continue';
         }
 
-        new BindableProperty(prop).registerWith(derived, _this15);
+        new BindableProperty(prop).registerWith(derived, _this13);
       };
 
       for (var _i8 = 0, _ii8 = behavior.properties.length; _i8 < _ii8; ++_i8) {
-        var _ret2 = _loop(_i8, _ii8);
+        var _ret = _loop(_i8, _ii8);
 
-        if (_ret2 === 'continue') continue;
+        if (_ret === 'continue') continue;
       }
     };
 
@@ -13076,6 +13211,12 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
         if (this.all) {
           var items = this.viewModel[this.property] || (this.viewModel[this.property] = []);
+
+          if (this.selector === '*') {
+            items.push(value);
+            return true;
+          }
+
           var index = 0;
           var prev = element.previousElementSibling;
 
@@ -13163,27 +13304,27 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     CompositionEngine.prototype._createControllerAndSwap = function _createControllerAndSwap(context) {
-      var _this16 = this;
+      var _this14 = this;
 
       return this.createController(context).then(function (controller) {
         controller.automate(context.overrideContext, context.owningView);
 
         if (context.compositionTransactionOwnershipToken) {
           return context.compositionTransactionOwnershipToken.waitForCompositionComplete().then(function () {
-            return _this16._swap(context, controller.view);
+            return _this14._swap(context, controller.view);
           }).then(function () {
             return controller;
           });
         }
 
-        return _this16._swap(context, controller.view).then(function () {
+        return _this14._swap(context, controller.view).then(function () {
           return controller;
         });
       });
     };
 
     CompositionEngine.prototype.createController = function createController(context) {
-      var _this17 = this;
+      var _this15 = this;
 
       var childContainer = void 0;
       var viewModel = void 0;
@@ -13196,7 +13337,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
         viewModelResource = context.viewModelResource;
         m = viewModelResource.metadata;
 
-        var viewStrategy = _this17.viewLocator.getViewStrategy(context.view || viewModel);
+        var viewStrategy = _this15.viewLocator.getViewStrategy(context.view || viewModel);
 
         if (context.viewResources) {
           viewStrategy.makeRelativeTo(context.viewResources.viewUrl);
@@ -13236,7 +13377,7 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
     };
 
     CompositionEngine.prototype.compose = function compose(context) {
-      var _this18 = this;
+      var _this16 = this;
 
       context.childContainer = context.childContainer || context.container.createChild();
       context.view = this.viewLocator.getViewStrategy(context.view);
@@ -13263,13 +13404,13 @@ define('aurelia-templating',['exports', 'aurelia-logging', 'aurelia-metadata', '
 
           if (context.compositionTransactionOwnershipToken) {
             return context.compositionTransactionOwnershipToken.waitForCompositionComplete().then(function () {
-              return _this18._swap(context, result);
+              return _this16._swap(context, result);
             }).then(function () {
               return result;
             });
           }
 
-          return _this18._swap(context, result).then(function () {
+          return _this16._swap(context, result).then(function () {
             return result;
           });
         });
@@ -13699,8 +13840,8 @@ define('aurelia-framework',['exports', 'aurelia-dependency-injection', 'aurelia-
     Aurelia.prototype.enhance = function enhance() {
       var _this2 = this;
 
-      var bindingContext = arguments.length <= 0 || arguments[0] === undefined ? {} : arguments[0];
-      var applicationHost = arguments.length <= 1 || arguments[1] === undefined ? null : arguments[1];
+      var bindingContext = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+      var applicationHost = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
 
       this._configureHost(applicationHost || _aureliaPal.DOM.querySelectorAll('body')[0]);
 
@@ -13716,8 +13857,8 @@ define('aurelia-framework',['exports', 'aurelia-dependency-injection', 'aurelia-
     Aurelia.prototype.setRoot = function setRoot() {
       var _this3 = this;
 
-      var root = arguments.length <= 0 || arguments[0] === undefined ? null : arguments[0];
-      var applicationHost = arguments.length <= 1 || arguments[1] === undefined ? null : arguments[1];
+      var root = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+      var applicationHost = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
 
       var instruction = {};
 
@@ -13946,7 +14087,7 @@ define('aurelia-framework',['exports', 'aurelia-dependency-injection', 'aurelia-
     };
 
     FrameworkConfiguration.prototype.feature = function feature(plugin) {
-      var config = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
+      var config = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
 
       var hasIndex = /\/index$/i.test(plugin);
       var moduleId = hasIndex || getExt(plugin) ? plugin : plugin + '/index';
@@ -14042,14 +14183,20 @@ define('aurelia-framework',['exports', 'aurelia-dependency-injection', 'aurelia-
       return this.basicConfiguration().history().router();
     };
 
-    FrameworkConfiguration.prototype.developmentLogging = function developmentLogging() {
+    FrameworkConfiguration.prototype.developmentLogging = function developmentLogging(level) {
       var _this6 = this;
+
+      var logLevel = level ? TheLogManager.logLevel[level] : undefined;
+
+      if (logLevel === undefined) {
+        logLevel = TheLogManager.logLevel.debug;
+      }
 
       this.preTask(function () {
         return _this6.aurelia.loader.normalize('aurelia-logging-console', _this6.bootstrapperName).then(function (name) {
           return _this6.aurelia.loader.loadModule(name).then(function (m) {
             TheLogManager.addAppender(new m.ConsoleAppender());
-            TheLogManager.setLevel(TheLogManager.logLevel.debug);
+            TheLogManager.setLevel(logLevel);
           });
         });
       });
@@ -14413,8 +14560,13 @@ define('aurelia-history-browser',['exports', 'aurelia-pal', 'aurelia-history'], 
 
     BrowserHistory.prototype.setState = function setState(key, value) {
       var state = Object.assign({}, this.history.state);
+      var _location = this.location;
+      var pathname = _location.pathname;
+      var search = _location.search;
+      var hash = _location.hash;
+
       state[key] = value;
-      this.history.replaceState(state, null, null);
+      this.history.replaceState(state, null, '' + pathname + search + hash);
     };
 
     BrowserHistory.prototype.getState = function getState(key) {
@@ -14627,7 +14779,7 @@ define('aurelia-loader-default',['exports', 'aurelia-loader', 'aurelia-pal', 'au
 
     DefaultLoader.prototype._import = function (moduleId) {
       return new Promise(function (resolve, reject) {
-        require([moduleId], resolve, reject);
+        _aureliaPal.PLATFORM.global.require([moduleId], resolve, reject);
       });
     };
 
@@ -14640,7 +14792,7 @@ define('aurelia-loader-default',['exports', 'aurelia-loader', 'aurelia-pal', 'au
       }
 
       return new Promise(function (resolve, reject) {
-        require([id], function (m) {
+        _aureliaPal.PLATFORM.global.require([id], function (m) {
           _this2.moduleRegistry[id] = m;
           resolve(ensureOriginOnExports(m, id));
         }, reject);
@@ -15023,26 +15175,109 @@ define('aurelia-pal-browser',['exports', 'aurelia-pal'], function (exports, _aur
   }
 
   if (typeof FEATURE_NO_IE === 'undefined') {
-    // @license http://opensource.org/licenses/MIT
-    if ('performance' in window === false) {
-      window.performance = {};
-    }
-
-    if ('now' in window.performance === false) {
-      (function () {
-        var nowOffset = Date.now();
-
-        if (performance.timing && performance.timing.navigationStart) {
-          nowOffset = performance.timing.navigationStart;
+    (function () {
+      var _filterEntries = function _filterEntries(key, value) {
+        var i = 0,
+            n = _entries.length,
+            result = [];
+        for (; i < n; i++) {
+          if (_entries[i][key] == value) {
+            result.push(_entries[i]);
+          }
         }
+        return result;
+      };
 
-        window.performance.now = function now() {
-          return Date.now() - nowOffset;
+      var _clearEntries = function _clearEntries(type, name) {
+        var i = _entries.length,
+            entry;
+        while (i--) {
+          entry = _entries[i];
+          if (entry.entryType == type && (name === void 0 || entry.name == name)) {
+            _entries.splice(i, 1);
+          }
+        }
+      };
+
+      // @license http://opensource.org/licenses/MIT
+      if ('performance' in window === false) {
+        window.performance = {};
+      }
+
+      if ('now' in window.performance === false) {
+        (function () {
+          var nowOffset = Date.now();
+
+          if (performance.timing && performance.timing.navigationStart) {
+            nowOffset = performance.timing.navigationStart;
+          }
+
+          window.performance.now = function now() {
+            return Date.now() - nowOffset;
+          };
+        })();
+      }
+
+      var startOffset = Date.now ? Date.now() : +new Date();
+      var _entries = [];
+      var _marksIndex = {};
+
+      ;
+
+      if (!window.performance.mark) {
+        window.performance.mark = window.performance.webkitMark || function (name) {
+          var mark = {
+            name: name,
+            entryType: "mark",
+            startTime: window.performance.now(),
+            duration: 0
+          };
+
+          _entries.push(mark);
+          _marksIndex[name] = mark;
         };
-      })();
-    }
+      }
 
-    _PLATFORM.performance = window.performance;
+      if (!window.performance.measure) {
+        window.performance.measure = window.performance.webkitMeasure || function (name, startMark, endMark) {
+          startMark = _marksIndex[startMark].startTime;
+          endMark = _marksIndex[endMark].startTime;
+
+          _entries.push({
+            name: name,
+            entryType: "measure",
+            startTime: startMark,
+            duration: endMark - startMark
+          });
+        };
+      }
+
+      if (!window.performance.getEntriesByType) {
+        window.performance.getEntriesByType = window.performance.webkitGetEntriesByType || function (type) {
+          return _filterEntries("entryType", type);
+        };
+      }
+
+      if (!window.performance.getEntriesByName) {
+        window.performance.getEntriesByName = window.performance.webkitGetEntriesByName || function (name) {
+          return _filterEntries("name", name);
+        };
+      }
+
+      if (!window.performance.clearMarks) {
+        window.performance.clearMarks = window.performance.webkitClearMarks || function (name) {
+          _clearEntries("mark", name);
+        };
+      }
+
+      if (!window.performance.clearMeasures) {
+        window.performance.clearMeasures = window.performance.webkitClearMeasures || function (name) {
+          _clearEntries("measure", name);
+        };
+      }
+
+      _PLATFORM.performance = window.performance;
+    })();
   }
 
   if (typeof FEATURE_NO_IE === 'undefined') {
@@ -15090,7 +15325,11 @@ define('aurelia-pal-browser',['exports', 'aurelia-pal'], function (exports, _aur
   var _FEATURE = exports._FEATURE = {
     shadowDOM: !!HTMLElement.prototype.attachShadow,
     scopedCSS: 'scoped' in document.createElement('style'),
-    htmlTemplateElement: 'content' in document.createElement('template'),
+    htmlTemplateElement: function () {
+      var d = document.createElement('div');
+      d.innerHTML = '<template></template>';
+      return 'content' in d.children[0];
+    }(),
     mutationObserver: !!(window.MutationObserver || window.WebKitMutationObserver),
     ensureHTMLTemplateElement: function ensureHTMLTemplateElement(t) {
       return t;
@@ -15160,6 +15399,7 @@ define('aurelia-pal-browser',['exports', 'aurelia-pal'], function (exports, _aur
 
   var _DOM = exports._DOM = {
     Element: Element,
+    NodeList: NodeList,
     SVGElement: SVGElement,
     boundary: 'aurelia-dom-boundary',
     addEventListener: function addEventListener(eventName, callback, capture) {
@@ -15251,10 +15491,28 @@ define('aurelia-pal-browser',['exports', 'aurelia-pal'], function (exports, _aur
         }
       }
     },
-    injectStyles: function injectStyles(styles, destination, prepend) {
+    injectStyles: function injectStyles(styles, destination, prepend, id) {
+      if (id) {
+        var oldStyle = document.getElementById(id);
+        if (oldStyle) {
+          var isStyleTag = oldStyle.tagName.toLowerCase() === 'style';
+
+          if (isStyleTag) {
+            oldStyle.innerHTML = styles;
+            return;
+          }
+
+          throw new Error('The provided id does not indicate a style tag.');
+        }
+      }
+
       var node = document.createElement('style');
       node.innerHTML = styles;
       node.type = 'text/css';
+
+      if (id) {
+        node.id = id;
+      }
 
       destination = destination || document.head;
 
@@ -16166,17 +16424,15 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
 
         if (viewPortInstruction.strategy === activationStrategy.replace) {
           if (viewPortInstruction.childNavigationInstruction && viewPortInstruction.childNavigationInstruction.parentCatchHandler) {
-            loads.push(viewPortInstruction.childNavigationInstruction._commitChanges());
+            loads.push(viewPortInstruction.childNavigationInstruction._commitChanges(waitToSwap));
           } else {
             if (waitToSwap) {
               delaySwaps.push({ viewPort: viewPort, viewPortInstruction: viewPortInstruction });
             }
             loads.push(viewPort.process(viewPortInstruction, waitToSwap).then(function (x) {
               if (viewPortInstruction.childNavigationInstruction) {
-                return viewPortInstruction.childNavigationInstruction._commitChanges();
+                return viewPortInstruction.childNavigationInstruction._commitChanges(waitToSwap);
               }
-
-              return undefined;
             }));
           }
         } else {
@@ -16369,6 +16625,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       return this.mapRoute(route);
     };
 
+    RouterConfiguration.prototype.useViewPortDefaults = function useViewPortDefaults(viewPortConfig) {
+      this.viewPortDefaults = viewPortConfig;
+      return this;
+    };
+
     RouterConfiguration.prototype.mapRoute = function mapRoute(config) {
       this.instructions.push(function (router) {
         var routeConfigs = [];
@@ -16421,6 +16682,10 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         router.fallbackRoute = this._fallbackRoute;
       }
 
+      if (this.viewPortDefaults) {
+        router.useViewPortDefaults(this.viewPortDefaults);
+      }
+
       router.options = this.options;
 
       var pipelineSteps = this.pipelineSteps;
@@ -16465,9 +16730,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
   }();
 
   function _buildNavigationPlan(instruction, forceLifecycleMinimum) {
-    var prev = instruction.previousInstruction;
     var config = instruction.config;
-    var plan = {};
 
     if ('redirect' in config) {
       var redirectLocation = _resolveUrl(config.redirect, getInstructionBaseUrl(instruction));
@@ -16478,15 +16741,20 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       return Promise.reject(new Redirect(redirectLocation));
     }
 
+    var prev = instruction.previousInstruction;
+    var plan = {};
+    var defaults = instruction.router.viewPortDefaults;
+
     if (prev) {
       var newParams = hasDifferentParameterValues(prev, instruction);
       var pending = [];
 
       var _loop2 = function _loop2(viewPortName) {
         var prevViewPortInstruction = prev.viewPortInstructions[viewPortName];
-        var nextViewPortConfig = config.viewPorts[viewPortName];
-
-        if (!nextViewPortConfig) throw new Error('Invalid Route Config: Configuration for viewPort "' + viewPortName + '" was not found for route: "' + instruction.config.route + '."');
+        var nextViewPortConfig = viewPortName in config.viewPorts ? config.viewPorts[viewPortName] : prevViewPortInstruction;
+        if (nextViewPortConfig.moduleId === null && viewPortName in instruction.router.viewPortDefaults) {
+          nextViewPortConfig = defaults[viewPortName];
+        }
 
         var viewPortPlan = plan[viewPortName] = {
           name: viewPortName,
@@ -16533,10 +16801,14 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
     }
 
     for (var viewPortName in config.viewPorts) {
+      var viewPortConfig = config.viewPorts[viewPortName];
+      if (viewPortConfig.moduleId === null && viewPortName in instruction.router.viewPortDefaults) {
+        viewPortConfig = defaults[viewPortName];
+      }
       plan[viewPortName] = {
         name: viewPortName,
         strategy: activationStrategy.replace,
-        config: instruction.config.viewPorts[viewPortName]
+        config: viewPortConfig
       };
     }
 
@@ -16610,6 +16882,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
 
       this.parent = null;
       this.options = {};
+      this.viewPortDefaults = {};
 
       this.transformTitle = function (title) {
         if (_this3.parent) {
@@ -16633,8 +16906,14 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       this.isNavigating = false;
       this.isExplicitNavigation = false;
       this.isExplicitNavigationBack = false;
+      this.isNavigatingFirst = false;
+      this.isNavigatingNew = false;
+      this.isNavigatingRefresh = false;
+      this.isNavigatingForward = false;
+      this.isNavigatingBack = false;
       this.navigation = [];
       this.currentInstruction = null;
+      this.viewPortDefaults = {};
       this._fallbackOrder = 100;
       this._recognizer = new _aureliaRouteRecognizer.RouteRecognizer();
       this._childRecognizer = new _aureliaRouteRecognizer.RouteRecognizer();
@@ -16833,6 +17112,15 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         } else {
           _current2.href = _normalizeAbsolutePath(_current2.config.href, this.history._hasPushState);
         }
+      }
+    };
+
+    Router.prototype.useViewPortDefaults = function useViewPortDefaults(viewPortDefaults) {
+      for (var viewPortName in viewPortDefaults) {
+        var viewPortConfig = viewPortDefaults[viewPortName];
+        this.viewPortDefaults[viewPortName] = {
+          moduleId: viewPortConfig.moduleId
+        };
       }
     };
 
@@ -17336,7 +17624,7 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
   }
 
   function loadRoute(routeLoader, navigationInstruction, viewPortPlan) {
-    var moduleId = viewPortPlan.config.moduleId;
+    var moduleId = viewPortPlan.config ? viewPortPlan.config.moduleId : null;
 
     return loadComponent(routeLoader, navigationInstruction, viewPortPlan.config).then(function (component) {
       var viewPortInstruction = navigationInstruction.addViewPortInstruction(viewPortPlan.name, viewPortPlan.strategy, moduleId, component);
@@ -17590,6 +17878,25 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
         }
 
         _this14.isNavigating = true;
+
+        var navtracker = _this14.history.getState('NavigationTracker');
+        if (!navtracker && !_this14.currentNavigationTracker) {
+          _this14.isNavigatingFirst = true;
+          _this14.isNavigatingNew = true;
+        } else if (!navtracker) {
+          _this14.isNavigatingNew = true;
+        } else if (!_this14.currentNavigationTracker) {
+          _this14.isNavigatingRefresh = true;
+        } else if (_this14.currentNavigationTracker < navtracker) {
+          _this14.isNavigatingForward = true;
+        } else if (_this14.currentNavigationTracker > navtracker) {
+          _this14.isNavigatingBack = true;
+        }if (!navtracker) {
+          navtracker = Date.now();
+          _this14.history.setState('NavigationTracker', navtracker);
+        }
+        _this14.currentNavigationTracker = navtracker;
+
         instruction.previousInstruction = _this14.currentInstruction;
 
         if (!instructionCount) {
@@ -17672,6 +17979,11 @@ define('aurelia-router',['exports', 'aurelia-logging', 'aurelia-route-recognizer
       router.isNavigating = false;
       router.isExplicitNavigation = false;
       router.isExplicitNavigationBack = false;
+      router.isNavigatingFirst = false;
+      router.isNavigatingNew = false;
+      router.isNavigatingRefresh = false;
+      router.isNavigatingForward = false;
+      router.isNavigatingBack = false;
 
       var eventName = void 0;
 
@@ -18171,7 +18483,7 @@ define('aurelia-templating-binding',['exports', 'aurelia-logging', 'aurelia-bind
     SyntaxInterpreter.prototype._getPrimaryPropertyName = function _getPrimaryPropertyName(resources, context) {
       var type = resources.getAttribute(context.attributeName);
       if (type && type.primaryProperty) {
-        return type.primaryProperty.name;
+        return type.primaryProperty.attribute;
       }
       return null;
     };
@@ -18505,7 +18817,7 @@ define('aurelia-templating-router/router-view',['exports', 'aurelia-dependency-i
       var viewModelResource = component.viewModelResource;
       var metadata = viewModelResource.metadata;
       var config = component.router.currentInstruction.config;
-      var viewPort = config.viewPorts ? config.viewPorts[viewPortInstruction.name] : {};
+      var viewPort = config.viewPorts ? config.viewPorts[viewPortInstruction.name] || {} : {};
 
       childContainer.get(RouterViewLocator)._notify(this);
 
@@ -18644,8 +18956,6 @@ define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-
   });
   exports.TemplatingRouteLoader = undefined;
 
-  
-
   function _possibleConstructorReturn(self, call) {
     if (!self) {
       throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
@@ -18670,9 +18980,14 @@ define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-
     if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
   }
 
-  var _dec, _class;
+  
 
-  var TemplatingRouteLoader = exports.TemplatingRouteLoader = (_dec = (0, _aureliaDependencyInjection.inject)(_aureliaTemplating.CompositionEngine), _dec(_class = function (_RouteLoader) {
+  var _dec, _class, _dec2, _class2;
+
+  var EmptyClass = (_dec = (0, _aureliaTemplating.inlineView)('<template></template>'), _dec(_class = function EmptyClass() {
+    
+  }) || _class);
+  var TemplatingRouteLoader = exports.TemplatingRouteLoader = (_dec2 = (0, _aureliaDependencyInjection.inject)(_aureliaTemplating.CompositionEngine), _dec2(_class2 = function (_RouteLoader) {
     _inherits(TemplatingRouteLoader, _RouteLoader);
 
     function TemplatingRouteLoader(compositionEngine) {
@@ -18687,7 +19002,16 @@ define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-
     TemplatingRouteLoader.prototype.loadRoute = function loadRoute(router, config) {
       var childContainer = router.container.createChild();
 
-      var viewModel = /\.html/.test(config.moduleId) ? createDynamicClass(config.moduleId) : (0, _aureliaPath.relativeToFile)(config.moduleId, _aureliaMetadata.Origin.get(router.container.viewModel.constructor).moduleId);
+      var viewModel = void 0;
+      if (config.moduleId === null) {
+        viewModel = EmptyClass;
+      } else if (/\.html/i.test(config.moduleId)) {
+        viewModel = createDynamicClass(config.moduleId);
+      } else {
+        viewModel = (0, _aureliaPath.relativeToFile)(config.moduleId, _aureliaMetadata.Origin.get(router.container.viewModel.constructor).moduleId);
+      }
+
+      config = config || {};
 
       var instruction = {
         viewModel: viewModel,
@@ -18712,15 +19036,15 @@ define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-
     };
 
     return TemplatingRouteLoader;
-  }(_aureliaRouter.RouteLoader)) || _class);
+  }(_aureliaRouter.RouteLoader)) || _class2);
 
 
   function createDynamicClass(moduleId) {
-    var _dec2, _dec3, _class2;
+    var _dec3, _dec4, _class3;
 
     var name = /([^\/^\?]+)\.html/i.exec(moduleId)[1];
 
-    var DynamicClass = (_dec2 = (0, _aureliaTemplating.customElement)(name), _dec3 = (0, _aureliaTemplating.useView)(moduleId), _dec2(_class2 = _dec3(_class2 = function () {
+    var DynamicClass = (_dec3 = (0, _aureliaTemplating.customElement)(name), _dec4 = (0, _aureliaTemplating.useView)(moduleId), _dec3(_class3 = _dec4(_class3 = function () {
       function DynamicClass() {
         
       }
@@ -18730,7 +19054,7 @@ define('aurelia-templating-router/route-loader',['exports', 'aurelia-dependency-
       };
 
       return DynamicClass;
-    }()) || _class2) || _class2);
+    }()) || _class3) || _class3);
 
 
     return DynamicClass;
@@ -18777,7 +19101,7 @@ define('aurelia-templating-router/route-href',['exports', 'aurelia-templating', 
       this.element = element;
     }
 
-    RouteHref.prototype.attached = function attached() {
+    RouteHref.prototype.bind = function bind() {
       this.isActive = true;
       this.processChange();
     };
@@ -20155,7 +20479,7 @@ define('aurelia-templating-resources/analyze-view-factory',['exports'], function
     value: true
   });
   exports.viewsRequireLifecycle = viewsRequireLifecycle;
-  var lifecycleOptionalBehaviors = exports.lifecycleOptionalBehaviors = ['focus', 'if', 'repeat', 'show', 'with'];
+  var lifecycleOptionalBehaviors = exports.lifecycleOptionalBehaviors = ['focus', 'if', 'else', 'repeat', 'show', 'hide', 'with'];
 
   function behaviorRequiresLifecycle(instruction) {
     var t = instruction.type;
@@ -21124,18 +21448,35 @@ define('aurelia-templating-resources/debounce-binding-behavior',['exports', 'aur
 
   
 
-  function debounce(newValue) {
+  var unset = {};
+
+  function debounceCallSource(event) {
     var _this = this;
 
     var state = this.debounceState;
-    if (state.immediate) {
-      state.immediate = false;
-      this.debouncedMethod(newValue);
-      return;
-    }
     clearTimeout(state.timeoutId);
     state.timeoutId = setTimeout(function () {
-      return _this.debouncedMethod(newValue);
+      return _this.debouncedMethod(event);
+    }, state.delay);
+  }
+
+  function debounceCall(context, newValue, oldValue) {
+    var _this2 = this;
+
+    var state = this.debounceState;
+    clearTimeout(state.timeoutId);
+    if (context !== state.callContextToDebounce) {
+      state.oldValue = unset;
+      this.debouncedMethod(context, newValue, oldValue);
+      return;
+    }
+    if (state.oldValue === unset) {
+      state.oldValue = oldValue;
+    }
+    state.timeoutId = setTimeout(function () {
+      var ov = state.oldValue;
+      state.oldValue = unset;
+      _this2.debouncedMethod(context, newValue, ov);
     }, state.delay);
   }
 
@@ -21147,22 +21488,23 @@ define('aurelia-templating-resources/debounce-binding-behavior',['exports', 'aur
     DebounceBindingBehavior.prototype.bind = function bind(binding, source) {
       var delay = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 200;
 
-      var methodToDebounce = 'updateTarget';
-      if (binding.callSource) {
-        methodToDebounce = 'callSource';
-      } else if (binding.updateSource && binding.mode === _aureliaBinding.bindingMode.twoWay) {
-        methodToDebounce = 'updateSource';
-      }
+      var isCallSource = binding.callSource !== undefined;
+      var methodToDebounce = isCallSource ? 'callSource' : 'call';
+      var debouncer = isCallSource ? debounceCallSource : debounceCall;
+      var mode = binding.mode;
+      var callContextToDebounce = mode === _aureliaBinding.bindingMode.twoWay || mode === _aureliaBinding.bindingMode.fromView ? _aureliaBinding.targetContext : _aureliaBinding.sourceContext;
 
       binding.debouncedMethod = binding[methodToDebounce];
       binding.debouncedMethod.originalName = methodToDebounce;
 
-      binding[methodToDebounce] = debounce;
+      binding[methodToDebounce] = debouncer;
 
       binding.debounceState = {
+        callContextToDebounce: callContextToDebounce,
         delay: delay,
-        timeoutId: null,
-        immediate: methodToDebounce === 'updateTarget' };
+        timeoutId: 0,
+        oldValue: unset
+      };
     };
 
     DebounceBindingBehavior.prototype.unbind = function unbind(binding, source) {
@@ -21319,16 +21661,12 @@ define('aurelia-templating-resources/update-trigger-binding-behavior',['exports'
 
   
 
-  var _class, _temp;
-
   var eventNamesRequired = 'The updateTrigger binding behavior requires at least one event name argument: eg <input value.bind="firstName & updateTrigger:\'blur\'">';
-  var notApplicableMessage = 'The updateTrigger binding behavior can only be applied to two-way bindings on input/select elements.';
+  var notApplicableMessage = 'The updateTrigger binding behavior can only be applied to two-way/ from-view bindings on input/select elements.';
 
-  var UpdateTriggerBindingBehavior = exports.UpdateTriggerBindingBehavior = (_temp = _class = function () {
-    function UpdateTriggerBindingBehavior(eventManager) {
+  var UpdateTriggerBindingBehavior = exports.UpdateTriggerBindingBehavior = function () {
+    function UpdateTriggerBindingBehavior() {
       
-
-      this.eventManager = eventManager;
     }
 
     UpdateTriggerBindingBehavior.prototype.bind = function bind(binding, source) {
@@ -21339,7 +21677,7 @@ define('aurelia-templating-resources/update-trigger-binding-behavior',['exports'
       if (events.length === 0) {
         throw new Error(eventNamesRequired);
       }
-      if (binding.mode !== _aureliaBinding.bindingMode.twoWay) {
+      if (binding.mode !== _aureliaBinding.bindingMode.twoWay && binding.mode !== _aureliaBinding.bindingMode.fromView) {
         throw new Error(notApplicableMessage);
       }
 
@@ -21351,17 +21689,18 @@ define('aurelia-templating-resources/update-trigger-binding-behavior',['exports'
 
       targetObserver.originalHandler = binding.targetObserver.handler;
 
-      var handler = this.eventManager.createElementHandler(events);
+      var handler = new _aureliaBinding.EventSubscriber(events);
       targetObserver.handler = handler;
     };
 
     UpdateTriggerBindingBehavior.prototype.unbind = function unbind(binding, source) {
+      binding.targetObserver.handler.dispose();
       binding.targetObserver.handler = binding.targetObserver.originalHandler;
       binding.targetObserver.originalHandler = null;
     };
 
     return UpdateTriggerBindingBehavior;
-  }(), _class.inject = [_aureliaBinding.EventManager], _temp);
+  }();
 });
 define('aurelia-templating-resources/dynamic-element',['exports', 'aurelia-templating'], function (exports, _aureliaTemplating) {
   'use strict';
@@ -21592,7 +21931,7 @@ define('aurelia-validation/util',["require", "exports"], function (require, expo
 define('aurelia-validation/property-accessor-parser',["require", "exports", "aurelia-binding", "./util"], function (require, exports, aurelia_binding_1, util_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    var PropertyAccessorParser = (function () {
+    var PropertyAccessorParser = /** @class */ (function () {
         function PropertyAccessorParser(parser) {
             this.parser = parser;
         }
@@ -21661,7 +22000,7 @@ define('aurelia-validation/validator',["require", "exports"], function (require,
     /**
      * Validates objects and properties.
      */
-    var Validator = (function () {
+    var Validator = /** @class */ (function () {
         function Validator() {
         }
         return Validator;
@@ -21675,7 +22014,7 @@ define('aurelia-validation/validate-result',["require", "exports"], function (re
     /**
      * The result of validating an individual validation rule.
      */
-    var ValidateResult = (function () {
+    var ValidateResult = /** @class */ (function () {
         /**
          * @param rule The rule associated with the result. Validator implementation specific.
          * @param object The object that was validated.
@@ -21703,36 +22042,36 @@ define('aurelia-validation/validate-result',["require", "exports"], function (re
 define('aurelia-validation/validate-event',["require", "exports"], function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    var ValidateEvent = (function () {
+    var ValidateEvent = /** @class */ (function () {
         function ValidateEvent(
-            /**
-             * The type of validate event. Either "validate" or "reset".
-             */
-            type, 
-            /**
-             * The controller's current array of errors. For an array containing both
-             * failed rules and passed rules, use the "results" property.
-             */
-            errors, 
-            /**
-             * The controller's current array of validate results. This
-             * includes both passed rules and failed rules. For an array of only failed rules,
-             * use the "errors" property.
-             */
-            results, 
-            /**
-             * The instruction passed to the "validate" or "reset" event. Will be null when
-             * the controller's validate/reset method was called with no instruction argument.
-             */
-            instruction, 
-            /**
-             * In events with type === "validate", this property will contain the result
-             * of validating the instruction (see "instruction" property). Use the controllerValidateResult
-             * to access the validate results specific to the call to "validate"
-             * (as opposed to using the "results" and "errors" properties to access the controller's entire
-             * set of results/errors).
-             */
-            controllerValidateResult) {
+        /**
+         * The type of validate event. Either "validate" or "reset".
+         */
+        type, 
+        /**
+         * The controller's current array of errors. For an array containing both
+         * failed rules and passed rules, use the "results" property.
+         */
+        errors, 
+        /**
+         * The controller's current array of validate results. This
+         * includes both passed rules and failed rules. For an array of only failed rules,
+         * use the "errors" property.
+         */
+        results, 
+        /**
+         * The instruction passed to the "validate" or "reset" event. Will be null when
+         * the controller's validate/reset method was called with no instruction argument.
+         */
+        instruction, 
+        /**
+         * In events with type === "validate", this property will contain the result
+         * of validating the instruction (see "instruction" property). Use the controllerValidateResult
+         * to access the validate results specific to the call to "validate"
+         * (as opposed to using the "results" and "errors" properties to access the controller's entire
+         * set of results/errors).
+         */
+        controllerValidateResult) {
             this.type = type;
             this.errors = errors;
             this.results = results;
@@ -21752,7 +22091,7 @@ define('aurelia-validation/validation-controller',["require", "exports", "./vali
      * Manages a set of bindings, renderers and objects.
      * Exposes the current list of validation results for binding purposes.
      */
-    var ValidationController = (function () {
+    var ValidationController = /** @class */ (function () {
         function ValidationController(validator, propertyParser) {
             this.validator = validator;
             this.propertyParser = propertyParser;
@@ -22162,7 +22501,7 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
     /**
      * Binding behavior. Indicates the bound property should be validated.
      */
-    var ValidateBindingBehaviorBase = (function () {
+    var ValidateBindingBehaviorBase = /** @class */ (function () {
         function ValidateBindingBehaviorBase(taskQueue) {
             this.taskQueue = taskQueue;
         }
@@ -22187,11 +22526,11 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
             var trigger = this.getValidateTrigger(controller);
             // tslint:disable-next-line:no-bitwise
             if (trigger & validate_trigger_1.validateTrigger.change) {
-                binding.standardUpdateSource = binding.updateSource;
+                binding.vbbUpdateSource = binding.updateSource;
                 // tslint:disable-next-line:only-arrow-functions
                 // tslint:disable-next-line:space-before-function-paren
                 binding.updateSource = function (value) {
-                    this.standardUpdateSource(value);
+                    this.vbbUpdateSource(value);
                     this.validationController.validateBinding(this);
                 };
             }
@@ -22215,9 +22554,9 @@ define('aurelia-validation/validate-binding-behavior-base',["require", "exports"
         };
         ValidateBindingBehaviorBase.prototype.unbind = function (binding) {
             // reset the binding to it's original state.
-            if (binding.standardUpdateSource) {
-                binding.updateSource = binding.standardUpdateSource;
-                binding.standardUpdateSource = null;
+            if (binding.vbbUpdateSource) {
+                binding.updateSource = binding.vbbUpdateSource;
+                binding.vbbUpdateSource = null;
             }
             if (binding.standardUpdateTarget) {
                 binding.updateTarget = binding.standardUpdateTarget;
@@ -22254,7 +22593,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
      * when the validate trigger specified by the associated controller's
      * validateTrigger property occurs.
      */
-    var ValidateBindingBehavior = (function (_super) {
+    var ValidateBindingBehavior = /** @class */ (function (_super) {
         __extends(ValidateBindingBehavior, _super);
         function ValidateBindingBehavior() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -22271,7 +22610,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
      * manually, by calling controller.validate(). No automatic validation
      * triggered by data-entry or blur will occur.
      */
-    var ValidateManuallyBindingBehavior = (function (_super) {
+    var ValidateManuallyBindingBehavior = /** @class */ (function (_super) {
         __extends(ValidateManuallyBindingBehavior, _super);
         function ValidateManuallyBindingBehavior() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -22287,7 +22626,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
      * Binding behavior. Indicates the bound property should be validated
      * when the associated element blurs.
      */
-    var ValidateOnBlurBindingBehavior = (function (_super) {
+    var ValidateOnBlurBindingBehavior = /** @class */ (function (_super) {
         __extends(ValidateOnBlurBindingBehavior, _super);
         function ValidateOnBlurBindingBehavior() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -22304,7 +22643,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
      * when the associated element is changed by the user, causing a change
      * to the model.
      */
-    var ValidateOnChangeBindingBehavior = (function (_super) {
+    var ValidateOnChangeBindingBehavior = /** @class */ (function (_super) {
         __extends(ValidateOnChangeBindingBehavior, _super);
         function ValidateOnChangeBindingBehavior() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -22321,7 +22660,7 @@ define('aurelia-validation/validate-binding-behavior',["require", "exports", "au
      * when the associated element blurs or is changed by the user, causing
      * a change to the model.
      */
-    var ValidateOnChangeOrBlurBindingBehavior = (function (_super) {
+    var ValidateOnChangeOrBlurBindingBehavior = /** @class */ (function (_super) {
         __extends(ValidateOnChangeOrBlurBindingBehavior, _super);
         function ValidateOnChangeOrBlurBindingBehavior() {
             return _super !== null && _super.apply(this, arguments) || this;
@@ -22341,7 +22680,7 @@ define('aurelia-validation/validation-controller-factory',["require", "exports",
     /**
      * Creates ValidationController instances.
      */
-    var ValidationControllerFactory = (function () {
+    var ValidationControllerFactory = /** @class */ (function () {
         function ValidationControllerFactory(container) {
             this.container = container;
         }
@@ -22382,7 +22721,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 define('aurelia-validation/validation-errors-custom-attribute',["require", "exports", "aurelia-binding", "aurelia-dependency-injection", "aurelia-templating", "./validation-controller", "aurelia-pal"], function (require, exports, aurelia_binding_1, aurelia_dependency_injection_1, aurelia_templating_1, validation_controller_1, aurelia_pal_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    var ValidationErrorsCustomAttribute = (function () {
+    var ValidationErrorsCustomAttribute = /** @class */ (function () {
         function ValidationErrorsCustomAttribute(boundaryElement, controllerAccessor) {
             this.boundaryElement = boundaryElement;
             this.controllerAccessor = controllerAccessor;
@@ -22458,7 +22797,7 @@ define('aurelia-validation/validation-errors-custom-attribute',["require", "expo
 define('aurelia-validation/validation-renderer-custom-attribute',["require", "exports", "./validation-controller"], function (require, exports, validation_controller_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    var ValidationRendererCustomAttribute = (function () {
+    var ValidationRendererCustomAttribute = /** @class */ (function () {
         function ValidationRendererCustomAttribute() {
         }
         ValidationRendererCustomAttribute.prototype.created = function (view) {
@@ -22485,7 +22824,7 @@ define('aurelia-validation/implementation/rules',["require", "exports"], functio
     /**
      * Sets, unsets and retrieves rules on an object or constructor function.
      */
-    var Rules = (function () {
+    var Rules = /** @class */ (function () {
         function Rules() {
         }
         /**
@@ -22525,7 +22864,7 @@ define('aurelia-validation/implementation/expression-visitor',["require", "expor
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     // tslint:disable:no-empty
-    var ExpressionVisitor = (function () {
+    var ExpressionVisitor = /** @class */ (function () {
         function ExpressionVisitor() {
         }
         ExpressionVisitor.prototype.visitChain = function (chain) {
@@ -22614,7 +22953,7 @@ var __extends = (this && this.__extends) || (function () {
 define('aurelia-validation/implementation/validation-message-parser',["require", "exports", "aurelia-binding", "aurelia-templating", "aurelia-logging", "./expression-visitor"], function (require, exports, aurelia_binding_1, aurelia_templating_1, LogManager, expression_visitor_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    var ValidationMessageParser = (function () {
+    var ValidationMessageParser = /** @class */ (function () {
         function ValidationMessageParser(bindinqLanguage) {
             this.bindinqLanguage = bindinqLanguage;
             this.emptyStringExpression = new aurelia_binding_1.LiteralString('');
@@ -22646,7 +22985,7 @@ define('aurelia-validation/implementation/validation-message-parser',["require",
         return ValidationMessageParser;
     }());
     exports.ValidationMessageParser = ValidationMessageParser;
-    var MessageExpressionValidator = (function (_super) {
+    var MessageExpressionValidator = /** @class */ (function (_super) {
         __extends(MessageExpressionValidator, _super);
         function MessageExpressionValidator(originalMessage) {
             var _this = _super.call(this) || this;
@@ -22694,7 +23033,7 @@ define('aurelia-validation/implementation/validation-messages',["require", "expo
     /**
      * Retrieves validation messages and property display names.
      */
-    var ValidationMessageProvider = (function () {
+    var ValidationMessageProvider = /** @class */ (function () {
         function ValidationMessageProvider(parser) {
             this.parser = parser;
         }
@@ -22750,7 +23089,7 @@ define('aurelia-validation/implementation/standard-validator',["require", "expor
      * Validates.
      * Responsible for validating objects and properties.
      */
-    var StandardValidator = (function (_super) {
+    var StandardValidator = /** @class */ (function (_super) {
         __extends(StandardValidator, _super);
         function StandardValidator(messageProvider, resources) {
             var _this = _super.call(this) || this;
@@ -22878,7 +23217,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
     /**
      * Part of the fluent rule API. Enables customizing property rules.
      */
-    var FluentRuleCustomizer = (function () {
+    var FluentRuleCustomizer = /** @class */ (function () {
         function FluentRuleCustomizer(property, condition, config, fluentEnsure, fluentRules, parsers) {
             if (config === void 0) { config = {}; }
             this.fluentEnsure = fluentEnsure;
@@ -23054,7 +23393,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
     /**
      * Part of the fluent rule API. Enables applying rules to properties and objects.
      */
-    var FluentRules = (function () {
+    var FluentRules = /** @class */ (function () {
         function FluentRules(fluentEnsure, parsers, property) {
             this.fluentEnsure = fluentEnsure;
             this.parsers = parsers;
@@ -23186,7 +23525,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
     /**
      * Part of the fluent rule API. Enables targeting properties and objects with rules.
      */
-    var FluentEnsure = (function () {
+    var FluentEnsure = /** @class */ (function () {
         function FluentEnsure(parsers) {
             this.parsers = parsers;
             /**
@@ -23254,7 +23593,7 @@ define('aurelia-validation/implementation/validation-rules',["require", "exports
     /**
      * Fluent rule definition API.
      */
-    var ValidationRules = (function () {
+    var ValidationRules = /** @class */ (function () {
         function ValidationRules() {
         }
         ValidationRules.initialize = function (messageParser, propertyParser) {
@@ -23342,7 +23681,7 @@ define('aurelia-validation/aurelia-validation',["require", "exports", "./get-tar
     /**
      * Aurelia Validation Configuration API
      */
-    var AureliaValidationConfiguration = (function () {
+    var AureliaValidationConfiguration = /** @class */ (function () {
         function AureliaValidationConfiguration() {
             this.validatorType = standard_validator_2.StandardValidator;
         }
